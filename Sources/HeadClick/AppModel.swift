@@ -38,6 +38,7 @@ final class AppModel: ObservableObject {
         let p = initial.first { $0.name == name } ?? .quietDesk
         controller = Controller(profile: p, sink: CursorDriver(), bounds: AppModel.screenBounds(), startPaused: !AppModel.startActive)
         profile = p
+        live.paused = !AppModel.startActive
         controller.onAction = { [weak self] a, _ in DispatchQueue.main.async { self?.firedAt[a] = Date() } }
         controller.onToast = { [weak self] text in DispatchQueue.main.async { self?.showToast(text) } }
     }
@@ -50,6 +51,8 @@ final class AppModel: ObservableObject {
         CGGetActiveDisplayList(8, &ids, &n)
         return ids.prefix(Int(n)).map { CGDisplayBounds($0) }.reduce(CGRect.null) { $0.union($1) }
     }
+
+    func toastHold(_ t: String) { toast = t }
 
     func showToast(_ text: String) {
         toast = text
@@ -157,7 +160,16 @@ enum Snapshot {
             w.appearance = NSAppearance(named: .aqua)
             v.displayIfNeeded()
             v.cacheDisplay(in: v.bounds, to: rep)
-            try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: out))
+            var data = rep.representation(using: .png, properties: [:])
+            if w is NSPanel {   // the overlay is transparent: composite it over a desktop-grey backdrop so the picture is readable
+                let img = NSImage(size: v.bounds.size)
+                img.lockFocus()
+                NSColor(calibratedWhite: 0.55, alpha: 1).setFill(); NSRect(origin: .zero, size: v.bounds.size).fill()
+                rep.draw(in: NSRect(origin: .zero, size: v.bounds.size))
+                img.unlockFocus()
+                if let t = img.tiffRepresentation, let r = NSBitmapImageRep(data: t) { data = r.representation(using: .png, properties: [:]) }
+            }
+            try? data?.write(to: URL(fileURLWithPath: out))
             NSApp.terminate(nil)
         }
     }

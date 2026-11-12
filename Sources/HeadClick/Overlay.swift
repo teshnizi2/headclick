@@ -21,6 +21,7 @@ final class Overlay {
             p.level = .screenSaver
             p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
             p.isReleasedWhenClosed = false
+            p.title = "HeadClick overlay"
             p.contentView = NSHostingView(rootView: OverlayView())
             panel = p
         }

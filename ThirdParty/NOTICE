@@ -1,0 +1,12 @@
+HeadClick bundles the following third-party software.
+
+MediaPipe (libmediapipe.dylib and face_landmarker.task), version 1.2.3
+Copyright The MediaPipe Authors
+Licensed under the Apache License, Version 2.0
+https://github.com/google-ai-edge/mediapipe
+You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
+The library is downloaded unmodified from the official PyPI wheel (mediapipe-1.2.3,
+py3-none-macosx_11_0_arm64) by scripts/fetch-mediapipe.sh; only its install name is changed.
+The face landmarker model is downloaded from storage.googleapis.com/mediapipe-models.
+
+test-face.jpg (Resources/) is MediaPipe's public sample portrait (mediapipe-assets), used only by --selftest.

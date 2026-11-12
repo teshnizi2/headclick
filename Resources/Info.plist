@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key><string>com.rezaahmadi.headclick</string>
+    <key>CFBundleName</key><string>HeadClick</string>
+    <key>CFBundleDisplayName</key><string>HeadClick</string>
+    <key>CFBundleExecutable</key><string>HeadClick</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleShortVersionString</key><string>0.1.0</string>
+    <key>CFBundleVersion</key><string>1</string>
+    <key>LSMinimumSystemVersion</key><string>15.0</string>
+    <key>LSUIElement</key><true/>
+    <key>NSHighResolutionCapable</key><true/>
+    <key>NSCameraUsageDescription</key><string>HeadClick reads the camera to track your head and face. Frames are processed on this Mac and never stored or sent.</string>
+    <key>NSMicrophoneUsageDescription</key><string>Only used by the optional sound-click gesture. Audio is processed on this Mac.</string>
+    <key>NSCameraReactionEffectGesturesEnabledDefault</key><false/>
+</dict>
+</plist>

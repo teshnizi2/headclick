@@ -1,0 +1,62 @@
+W0000 00:00:1794478550.690776 5946955 face_landmarker_graph.cc:181] Sets FaceBlendshapesGraph acceleration to xnnpack by default.
+INFO: Created TensorFlow Lite XNNPACK delegate for CPU.
+W0000 00:00:1794478550.714693 5946963 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
+W0000 00:00:1794478550.751849 5946963 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
+engine created in 247 ms
+image: /Users/teshnizi/Projects/cursor-control/app/build/HeadClick.app/Contents/Resources/test-face.jpg
+detect (incl. file decode) median 89.4 ms, p95 496.7 ms
+landmarks: 478  blendshapes: 52
+pose  yaw -1.8°  pitch 4.2°  roll 0.4°  scale 1.00
+  _neutral               0.000
+  browDownLeft           0.766
+  browDownRight          0.751
+  browInnerUp            0.000
+  browOuterUpLeft        0.000
+  browOuterUpRight       0.000
+  cheekPuff              0.001
+  cheekSquintLeft        0.000
+  cheekSquintRight       0.000
+  eyeBlinkLeft           0.232
+  eyeBlinkRight          0.243
+  eyeLookDownLeft        0.142
+  eyeLookDownRight       0.168
+  eyeLookInLeft          0.037
+  eyeLookInRight         0.118
+  eyeLookOutLeft         0.152
+  eyeLookOutRight        0.077
+  eyeLookUpLeft          0.113
+  eyeLookUpRight         0.117
+  eyeSquintLeft          0.729
+  eyeSquintRight         0.635
+  eyeWideLeft            0.004
+  eyeWideRight           0.004
+  jawForward             0.003
+  jawLeft                0.001
+  jawOpen                0.100
+  jawRight               0.000
+  mouthClose             0.014
+  mouthDimpleLeft        0.017
+  mouthDimpleRight       0.021
+  mouthFrownLeft         0.001
+  mouthFrownRight        0.001
+  mouthFunnel            0.005
+  mouthLeft              0.000
+  mouthLowerDownLeft     0.048
+  mouthLowerDownRight    0.134
+  mouthPressLeft         0.144
+  mouthPressRight        0.136
+  mouthPucker            0.002
+  mouthRight             0.002
+  mouthRollLower         0.011
+  mouthRollUpper         0.070
+  mouthShrugLower        0.006
+  mouthShrugUpper        0.005
+  mouthSmileLeft         0.943
+  mouthSmileRight        0.923
+  mouthStretchLeft       0.086
+  mouthStretchRight      0.105
+  mouthUpperUpLeft       0.792
+  mouthUpperUpRight      0.781
+  noseSneerLeft          0.000
+  noseSneerRight         0.000
+PASS

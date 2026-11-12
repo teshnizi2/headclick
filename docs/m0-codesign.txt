@@ -1,0 +1,3 @@
+Identifier=com.rezaahmadi.headclick
+Signature size=4811
+TeamIdentifier=F7C9JMJW5R

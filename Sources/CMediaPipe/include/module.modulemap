@@ -1,0 +1,4 @@
+module CMediaPipe {
+    header "mp.h"
+    export *
+}

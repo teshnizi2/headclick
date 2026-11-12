@@ -16,7 +16,7 @@ final class AppModel: ObservableObject {
     @Published var accessibilityOK = CursorDriver.isTrusted
     @Published var profiles: [Profile] = ProfileStore.loadAll()
     @Published var profile: Profile = .quietDesk {
-        didSet { if profile != oldValue { controller.setProfile(profile); ProfileStore.save(profile); UserDefaults.standard.set(profile.name, forKey: ProfileStore.currentKey) } }
+        didSet { if profile != oldValue { controller.setProfile(profile); if profile.gazeJump != oldValue.gazeJump { applyGaze() }; ProfileStore.save(profile); UserDefaults.standard.set(profile.name, forKey: ProfileStore.currentKey) } }
     }
     @Published var toast: String?
     @Published var firedAt: [Action: Date] = [:]
@@ -65,6 +65,7 @@ final class AppModel: ObservableObject {
     func bootstrap() {
         guard !started else { return }
         started = true
+        applyGaze()
         SafetyGuard.shared.start { [weak self] in
             guard let self, !self.controller.paused else { return }
             self.controller.setPaused(true)
@@ -110,7 +111,49 @@ final class AppModel: ObservableObject {
         controller.setPaused(pausedBeforeCalibration, toast: false)
     }
 
-    func startGazeCalibration() {}
+    // MARK: gaze
+    let gaze = GazeEstimator.load()
+    lazy var jumper = GazeJumper(estimator: gaze)
+    private var gazeCal: GazeCalibrator?
+    private var gazeWindow: GazeWindow?
+    @Published var gazeOnly = false { didSet { jumper.onlyMode = gazeOnly; applyGaze() } }
+
+    func applyGaze() {
+        let on = (profile.gazeJump || gazeOnly) && jumper.estimator.isCalibrated
+        controller.gaze = on ? jumper : nil
+        jumper.reset()
+        gazeSummary = jumper.estimator.isCalibrated ? "calibrated" : "not calibrated yet"
+    }
+
+    func startGazeCalibration() {
+        guard let scr = NSScreen.main else { return }
+        endCalibration(calibratorRef, apply: false)
+        let sizeMM = CGDisplayScreenSize(CGMainDisplayID())
+        let widthCm = sizeMM.width > 0 ? Double(sizeMM.width) / 10 : 30
+        let bounds = CGRect(origin: .zero, size: scr.frame.size)
+        let cal = GazeCalibrator(screen: bounds, screenWidthCm: widthCm)
+        gazeCal = cal
+        pausedBeforeCalibration = controller.paused
+        controller.setPaused(true, toast: false)
+        let w = GazeWindow(contentRect: scr.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        w.level = .screenSaver; w.isReleasedWhenClosed = false; w.backgroundColor = .clear
+        w.title = "HeadClick gaze calibration"
+        w.onEscape = { [weak self] in self?.endGazeCalibration(apply: false) }
+        w.contentView = NSHostingView(rootView: GazeCalibrationView(cal: cal, screen: bounds) { [weak self] ok in self?.endGazeCalibration(apply: ok) })
+        gazeWindow = w
+        w.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func endGazeCalibration(apply: Bool) {
+        guard let cal = gazeCal else { return }
+        if apply, !cal.failed, cal.estimator.isCalibrated {
+            jumper.estimator.adopt(cal.estimator); jumper.estimator.save()
+            showToast(String(format: "Gaze calibrated: %.1f cm", cal.meanErrorCm))
+        }
+        gazeWindow?.orderOut(nil); gazeWindow = nil; gazeCal = nil
+        controller.setPaused(pausedBeforeCalibration, toast: false)
+        applyGaze()
+    }
 
     func togglePause() {
         if controller.paused { SafetyGuard.shared.graceUntil = Date().addingTimeInterval(1.0) }
@@ -124,6 +167,7 @@ final class AppModel: ObservableObject {
             guard let self else { return }
             self.controller.process(f, now: t)
             if let cal = self.calibratorRef { DispatchQueue.main.async { cal.feed(f, now: t) } }
+            if let gc = self.gazeCal { DispatchQueue.main.async { gc.feed(f, now: t) } }
             let now = CFAbsoluteTimeGetCurrent()
             if now - self.lastPublish < 1 / 20.0 { return }
             self.lastPublish = now

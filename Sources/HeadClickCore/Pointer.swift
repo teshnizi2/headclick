@@ -50,11 +50,16 @@ public final class HeadPointer {
         let dt = 1.0 / 30
         speedDegPerSec = (dy * dy + dp * dp).squareRoot() / dt
         if frozen { acc = (0, 0); return position }
-        // Dead zone as an accumulator so slow, deliberate movement still gets through.
-        acc.0 += dy; acc.1 += dp
-        dy = 0; dp = 0
-        if abs(acc.0) >= settings.deadZoneDeg { dy = acc.0; acc.0 = 0 }
-        if abs(acc.1) >= settings.deadZoneDeg { dp = acc.1; acc.1 = 0 }
+        // Backlash-style dead zone: the accumulator may wander inside +-deadZone without moving the cursor;
+        // beyond that only the excess passes, so there is no jump when it opens.
+        let dz = settings.deadZoneDeg
+        func soft(_ a: inout Double, _ d: Double) -> Double {
+            a += d
+            if a > dz { let out = a - dz; a = dz; return out }
+            if a < -dz { let out = a + dz; a = -dz; return out }
+            return 0
+        }
+        dy = soft(&acc.0, dy); dp = soft(&acc.1, dp)
         let mult = 1 + settings.acceleration * speedDegPerSec
         let sx = settings.invertX ? -1.0 : 1.0, sy = settings.invertY ? -1.0 : 1.0
         position = clamp(CGPoint(x: position.x + sx * dy * settings.gainX * mult, y: position.y + sy * dp * settings.gainY * mult))

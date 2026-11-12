@@ -8,6 +8,7 @@ struct HeadClickApp: App {
             AppModel.shared.bootstrap()
             if CommandLine.arguments.contains("--show-debug") { Windows.showDebug() }
             if CommandLine.arguments.contains("--show-settings") { Windows.showSettings() }
+            if CommandLine.arguments.contains("--show-gaze-cal") { AppModel.shared.startGazeCalibration() }
             if CommandLine.arguments.contains("--show-overlay") { AppModel.shared.overlayOn = true }
             if CommandLine.arguments.contains("--demo-toast") { DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { AppModel.shared.toastHold("Pucker → Right click") } }
             Snapshot.scheduleIfRequested(CommandLine.arguments)
@@ -27,6 +28,9 @@ struct HeadClickApp: App {
                 ForEach(model.profiles, id: \.name) { Text($0.name).tag($0) }
             }
             Toggle("Filming overlay   ⌃⌥O", isOn: $model.overlayOn)
+            Toggle("Gaze jump", isOn: $model.profile.gazeJump)
+            Toggle("Gaze only (comparison mode)", isOn: $model.gazeOnly)
+            Button("Calibrate gaze…") { model.startGazeCalibration() }
             Divider()
             Button("Settings…") { Windows.showSettings() }
             Button("Calibrate pointer…") { model.startCalibration(.pointer) }

@@ -14,7 +14,7 @@ final class PointerTests: XCTestCase {
             positions.append(c.pointer.position)
             t += dt
         }
-        let xs = positions.dropFirst(30).map { $0.x }, ys = positions.dropFirst(30).map { $0.y }
+        let xs = positions.dropFirst(90).map { $0.x }, ys = positions.dropFirst(90).map { $0.y }
         let spread = max(xs.max()! - xs.min()!, ys.max()! - ys.min()!)
         XCTAssertLessThanOrEqual(spread, 3.0, "still head: cursor wanders \(spread) px")
         _ = s

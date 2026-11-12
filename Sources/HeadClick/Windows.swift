@@ -17,6 +17,7 @@ enum Windows {
         w.isReleasedWhenClosed = false
         w.center()
         cache[id] = w
+        NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: w, queue: .main) { _ in MainActor.assumeIsolated { if cache[id] === w { cache[id] = nil } } }
         w.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }

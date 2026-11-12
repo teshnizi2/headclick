@@ -70,7 +70,7 @@ public struct PointerSettings: Codable, Equatable, Hashable {
     public var gainY: Double = 65
     /// Extra gain for fast movement (0 = none).
     public var acceleration: Double = 0.012
-    public var deadZoneDeg: Double = 0.12
+    public var deadZoneDeg: Double = 0.15
     public var invertX = false
     public var invertY = false
     public var invertScroll = false

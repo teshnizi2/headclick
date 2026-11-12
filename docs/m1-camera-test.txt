@@ -1,0 +1,7 @@
+camera authorization: 3 (0 undetermined, 3 authorized)
+camera: MacBook Air Camera
+center stage enabled: false
+frames 193, with face 162, fps 29.8, engine median 31.6 ms p95 72.0 ms
+yaw mean 8.10 sd 12.564   pitch mean -18.45 sd 9.028
+max blendshapes: browDownLeft=0.98 browDownRight=0.78 browInnerUp=0.87 browOuterUpLeft=0.90 browOuterUpRight=0.77 eyeBlinkLeft=0.98 eyeBlinkRight=0.93 eyeLookDownLeft=1.00 eyeLookDownRight=1.00 eyeLookInLeft=0.95 eyeLookInRight=1.00 eyeLookOutLeft=1.00 eyeLookOutRight=0.51 eyeLookUpLeft=0.94 eyeLookUpRight=0.98 eyeSquintLeft=0.51 eyeSquintRight=0.65 eyeWideRight=0.61 mouthDimpleRight=0.82 mouthFrownLeft=0.65 mouthFrownRight=0.62 mouthFunnel=0.73 mouthPressLeft=0.52 mouthPressRight=0.73 mouthPucker=0.65 mouthRight=0.31 mouthShrugLower=0.97 mouthShrugUpper=0.71 mouthSmileLeft=0.75 mouthSmileRight=0.81 mouthStretchLeft=0.63 mouthUpperUpLeft=0.52 mouthUpperUpRight=0.75
+CHECK (fps>=25, engine<=10ms expected)

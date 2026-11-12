@@ -21,5 +21,9 @@ enum Windows {
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    static func close(_ id: String) { cache[id]?.close(); cache[id] = nil }
+
+    static func showSettings() { show("settings", title: "HeadClick settings", size: NSSize(width: 960, height: 700)) { SettingsView() } }
+
     static func showDebug() { show("debug", title: "HeadClick debug", size: NSSize(width: 600, height: 560)) { DebugView() } }
 }

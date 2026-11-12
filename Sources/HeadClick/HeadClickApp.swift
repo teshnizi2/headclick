@@ -7,6 +7,8 @@ struct HeadClickApp: App {
         Task { @MainActor in
             AppModel.shared.bootstrap()
             if CommandLine.arguments.contains("--show-debug") { Windows.showDebug() }
+            if CommandLine.arguments.contains("--show-settings") { Windows.showSettings() }
+            if CommandLine.arguments.contains("--show-overlay") { AppModel.shared.overlayOn = true }
             Snapshot.scheduleIfRequested(CommandLine.arguments)
         }
     }
@@ -25,6 +27,8 @@ struct HeadClickApp: App {
             }
             Toggle("Filming overlay   ⌃⌥O", isOn: $model.overlayOn)
             Divider()
+            Button("Settings…") { Windows.showSettings() }
+            Button("Calibrate pointer…") { model.startCalibration(.pointer) }
             Button("Debug window") { Windows.showDebug() }
             Divider()
             Button("Quit HeadClick") { NSApplication.shared.terminate(nil) }.keyboardShortcut("q")

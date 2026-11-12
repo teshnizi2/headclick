@@ -19,6 +19,11 @@ final class AppModel: ObservableObject {
         didSet { if profile != oldValue { controller.setProfile(profile); ProfileStore.save(profile); UserDefaults.standard.set(profile.name, forKey: ProfileStore.currentKey) } }
     }
     @Published var toast: String?
+    @Published var firedAt: [Action: Date] = [:]
+    @Published var calibrator: Calibrator?
+    @Published var gazeSummary = ""
+    private var calibratorRef: Calibrator?
+    private var pausedBeforeCalibration = false
     @Published var overlayOn = false { didSet { Overlay.shared.set(visible: overlayOn) } }
 
     let pipeline = Pipeline()
@@ -31,10 +36,14 @@ final class AppModel: ObservableObject {
         let initial = ProfileStore.loadAll()
         let name = UserDefaults.standard.string(forKey: ProfileStore.currentKey)
         let p = initial.first { $0.name == name } ?? .quietDesk
-        controller = Controller(profile: p, sink: CursorDriver(), bounds: AppModel.screenBounds())
+        controller = Controller(profile: p, sink: CursorDriver(), bounds: AppModel.screenBounds(), startPaused: !AppModel.startActive)
         profile = p
+        controller.onAction = { [weak self] a, _ in DispatchQueue.main.async { self?.firedAt[a] = Date() } }
         controller.onToast = { [weak self] text in DispatchQueue.main.async { self?.showToast(text) } }
     }
+
+    /// Always starts paused. Only a time-limited test run (`--test-seconds N --active`) may start tracking at once.
+    static var startActive: Bool { CommandLine.arguments.contains("--active") && CommandLine.arguments.contains("--test-seconds") }
 
     static func screenBounds() -> CGRect {
         var ids = [CGDirectDisplayID](repeating: 0, count: 8); var n: UInt32 = 0
@@ -53,9 +62,14 @@ final class AppModel: ObservableObject {
     func bootstrap() {
         guard !started else { return }
         started = true
+        SafetyGuard.shared.start { [weak self] in
+            guard let self, !self.controller.paused else { return }
+            self.controller.setPaused(true)
+        }
         Hotkeys.shared.register(key: kVK_ANSI_P) { [weak self] in self?.togglePause() }
         Hotkeys.shared.register(key: kVK_ANSI_O) { [weak self] in self?.overlayOn.toggle() }
         Hotkeys.shared.register(key: kVK_ANSI_R) { [weak self] in self?.controller.recenter() }
+        if !CursorDriver.isTrusted && !CommandLine.arguments.contains("--snapshot") { CursorDriver.requestTrust() }
         switch Camera.authorization {
         case .authorized: startPipeline()
         case .notDetermined:
@@ -68,7 +82,37 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func togglePause() { controller.setPaused(!controller.paused) }
+    func firedRecently(_ a: Action) -> Bool { firedAt[a].map { Date().timeIntervalSince($0) < 0.5 } ?? false }
+
+    // MARK: calibration
+    func startCalibration(_ kind: Calibrator.Kind) {
+        endCalibration(calibratorRef, apply: false)
+        let c = Calibrator(kind: kind, profile: profile, screen: AppModel.screenBounds())
+        pausedBeforeCalibration = controller.paused
+        controller.setPaused(true, toast: false)
+        calibratorRef = c; calibrator = c
+        Windows.show("calibration", title: "HeadClick calibration", size: NSSize(width: 520, height: 320)) {
+            CalibrationView(cal: c) { Windows.close("calibration") }
+        }
+    }
+
+    func endCalibration(_ c: Calibrator?, apply: Bool) {
+        guard let c, c === calibratorRef else { return }
+        if apply {
+            profile = c.apply(to: profile)
+            if c.kind == .pointer { controller.recenter() }
+            if c.kind == .talkTest { showToast("Talk test saved") }
+        }
+        calibratorRef = nil; calibrator = nil
+        controller.setPaused(pausedBeforeCalibration, toast: false)
+    }
+
+    func startGazeCalibration() {}
+
+    func togglePause() {
+        if controller.paused { SafetyGuard.shared.graceUntil = Date().addingTimeInterval(1.0) }
+        controller.setPaused(!controller.paused)
+    }
 
     func requestAccessibility() { CursorDriver.requestTrust(); accessibilityOK = CursorDriver.isTrusted }
 
@@ -76,6 +120,7 @@ final class AppModel: ObservableObject {
         pipeline.onResult = { [weak self] f, t in
             guard let self else { return }
             self.controller.process(f, now: t)
+            if let cal = self.calibratorRef { DispatchQueue.main.async { cal.feed(f, now: t) } }
             let now = CFAbsoluteTimeGetCurrent()
             if now - self.lastPublish < 1 / 20.0 { return }
             self.lastPublish = now

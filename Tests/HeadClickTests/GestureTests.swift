@@ -195,7 +195,13 @@ final class GestureTests: XCTestCase {
         drive(c, from: 1, seconds: 3) { _ in nil }
         XCTAssertEqual(s.events.count, n, "no cursor events without a face")
         XCTAssertTrue(c.status.autoPaused)
-        drive(c, from: 4, seconds: 0.5) { t in frame(t) }
+        XCTAssertTrue(c.paused)
+        let m = s.events.count
+        drive(c, from: 4, seconds: 1) { t in frame(t, yaw: Float(t * 5)) }
+        XCTAssertTrue(c.paused, "a lost face needs an explicit resume")
+        XCTAssertEqual(s.events.count, m)
+        c.setPaused(false)
+        drive(c, from: 5, seconds: 0.2) { t in frame(t) }
         XCTAssertFalse(c.status.autoPaused)
     }
 

@@ -46,7 +46,8 @@ public final class Controller {
     private var swapIndex: [Int] = []
     private let lock = NSRecursiveLock()
 
-    public init(profile: Profile, sink: CursorSink, bounds: CGRect) {
+    public init(profile: Profile, sink: CursorSink, bounds: CGRect, startPaused: Bool = false) {
+        paused = startPaused
         self.profile = profile; self.sink = sink; self.bounds = bounds
         pointer = HeadPointer(bounds: bounds, position: sink.currentPosition)
         pointer.settings = profile.pointer
@@ -90,7 +91,7 @@ public final class Controller {
     public func setPaused(_ p: Bool, toast: Bool = true) {
         lock.lock(); defer { lock.unlock() }
         guard p != paused else { return }
-        paused = p
+        paused = p; autoPaused = false
         if p { releaseDrag() }
         for tr in trackers.values { tr.reset() }
         pointer.resetFilters()
@@ -127,13 +128,13 @@ public final class Controller {
         guard var f = frame else {
             st.faceFound = false
             if faceLostSince == nil { faceLostSince = now }
-            if now - faceLostSince! > 2, !autoPaused { autoPaused = true; releaseDrag(); onToast?("Face lost: paused") }
+            // Safety: losing the face for more than 1 s is a real pause; the user resumes explicitly.
+            if now - faceLostSince! > 1, !paused { paused = true; autoPaused = true; releaseDrag(); pointer.resetFilters(); onToast?("Face lost: paused") }
             for tr in trackers.values { tr.reset() }
             poseEvents.reset(); lastYawPitch = nil
             return
         }
         faceLostSince = nil
-        if autoPaused { autoPaused = false; pointer.resetFilters(); onToast?("Tracking") }
         st.paused = paused
         st.faceFound = true
         if profile.swapLeftRight { let o = f.blend; for i in 0..<o.count { f.blend[i] = o[swapIndex[i]] } }

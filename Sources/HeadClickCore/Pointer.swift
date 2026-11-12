@@ -83,6 +83,12 @@ public extension CursorSink {
 /// Posts real mouse events. Needs the Accessibility permission.
 public final class CursorDriver: CursorSink {
     public init() {}
+    /// Marks events we post so the safety monitor can tell them from the user's real input.
+    public static let marker: Int64 = 0x48434C4B
+    private func post(_ e: CGEvent?) {
+        e?.setIntegerValueField(.eventSourceUserData, value: CursorDriver.marker)
+        e?.post(tap: .cghidEventTap)
+    }
     public static var isTrusted: Bool { AXIsProcessTrusted() }
     public static func requestTrust() {
         let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
@@ -92,7 +98,7 @@ public final class CursorDriver: CursorSink {
 
     public func move(to p: CGPoint, dragging: Bool) {
         let e = CGEvent(mouseEventSource: nil, mouseType: dragging ? .leftMouseDragged : .mouseMoved, mouseCursorPosition: p, mouseButton: .left)
-        e?.post(tap: .cghidEventTap)
+        post(e)
     }
 
     public func button(_ b: MouseButton, down: Bool, at p: CGPoint, clickState: Int) {
@@ -107,11 +113,11 @@ public final class CursorDriver: CursorSink {
         }
         let e = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: p, mouseButton: btn)
         e?.setIntegerValueField(.mouseEventClickState, value: Int64(clickState))
-        e?.post(tap: .cghidEventTap)
+        post(e)
     }
 
     public func scroll(pixelsY: Double) {
         let e = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: Int32(pixelsY.rounded()), wheel2: 0, wheel3: 0)
-        e?.post(tap: .cghidEventTap)
+        post(e)
     }
 }

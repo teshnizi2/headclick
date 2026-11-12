@@ -11,15 +11,15 @@
   td{padding:2px 10px}
 </style>
 <div id="bar">
-  <b>HeadClick target test</b>
+  <b>HeadClick target test</b> <span id="nlab"></span>
   <label>Mode <select id="mode"><option>head only</option><option>head + gaze jump</option><option>gaze only</option><option>trackpad (baseline)</option></select></label>
-  <button id="start">Start (20 targets)</button>
+  <button id="start">Start</button>
   <span id="status">Click Start, then click each red dot as fast as you can.</span>
 </div>
 <div id="stage"></div>
 <div id="log"><b>Results</b><table id="res"></table></div>
 <script>
-const N=20, stage=document.getElementById('stage'), st=document.getElementById('status');
+const N=Math.max(1,parseInt(new URLSearchParams(location.search).get("n")||"20")), stage=document.getElementById('stage'), st=document.getElementById('status');
 let n=0, t0=0, tt=0, errors=0, running=false, seed=1;
 function rnd(){seed=(seed*1664525+1013904223)>>>0;return seed/4294967296}
 function pos(){const m=60,w=stage.clientWidth,h=stage.clientHeight;return [m+rnd()*(w-2*m),m+rnd()*(h-2*m)]}
@@ -33,5 +33,6 @@ function finish(){running=false;stage.innerHTML='';const s=(performance.now()-t0
   st.textContent=`Done: ${row.total} s, ${row.per} s per target, ${row.miss} missed clicks.`;render()}
 function render(){const all=JSON.parse(localStorage.getItem('hc-results')||'[]');
   document.getElementById('res').innerHTML='<tr><td>mode</td><td>total s</td><td>s/target</td><td>misses</td></tr>'+all.slice(-8).map(r=>`<tr><td>${r.mode}</td><td>${r.total}</td><td>${r.per}</td><td>${r.miss}</td></tr>`).join('')}
+document.getElementById("nlab").textContent=`( targets; add ?n=5 to the address to change)`;
 render();
 </script>

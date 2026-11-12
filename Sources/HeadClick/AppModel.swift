@@ -36,10 +36,15 @@ final class AppModel: ObservableObject {
         let initial = ProfileStore.loadAll()
         let name = UserDefaults.standard.string(forKey: ProfileStore.currentKey)
         let p = initial.first { $0.name == name } ?? .quietDesk
-        controller = Controller(profile: p, sink: CursorDriver(), bounds: AppModel.screenBounds(), startPaused: !AppModel.startActive)
+        controller = Controller(profile: p, sink: Recorder.path == nil ? CursorDriver() : RecordingSink(), bounds: AppModel.screenBounds(), startPaused: !AppModel.startActive)
         profile = p
         live.paused = !AppModel.startActive
-        controller.onAction = { [weak self] a, _ in DispatchQueue.main.async { self?.firedAt[a] = Date() } }
+        controller.onAction = { [weak self] a, g in Recorder.shared.action("\(a.title) via \(Catalog.spec(g).title)"); DispatchQueue.main.async { self?.firedAt[a] = Date() } }
+        Recorder.shared.extra = { [weak self] in
+            guard let self else { return "" }
+            let st = self.controller.snapshot()
+            return String(format: "camera fps %.1f, engine median %.1f ms, face in view at end: %@, paused at end: %@\n", self.pipeline.fps, self.pipeline.engineMs, st.faceFound ? "yes" : "no", st.paused ? "yes" : "no")
+        }
         controller.onToast = { [weak self] text in DispatchQueue.main.async { self?.showToast(text) } }
     }
 

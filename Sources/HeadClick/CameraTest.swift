@@ -21,9 +21,11 @@ enum CameraTest {
         var faces = 0, frames = 0
         var blendMax = [Float](repeating: 0, count: 52)
         var yaw: [Float] = [], pitch: [Float] = [], ms: [Double] = []
-        p.onResult = { f in
+        let hp = HeadPointer(bounds: CGRect(x: 0, y: 0, width: 1440, height: 900), position: CGPoint(x: 720, y: 450))
+        var px: [CGPoint] = []
+        p.onResult = { f, t in
             frames += 1
-            if let f { faces += 1; ms.append(f.engineMs); yaw.append(f.yaw); pitch.append(f.pitch); for i in 0..<52 { blendMax[i] = max(blendMax[i], f.blend[i]) } }
+            if let f { hp.update(t: t, yaw: Double(f.yaw), pitch: Double(f.pitch), frozen: false); px.append(hp.position); faces += 1; ms.append(f.engineMs); yaw.append(f.yaw); pitch.append(f.pitch); for i in 0..<52 { blendMax[i] = max(blendMax[i], f.blend[i]) } }
         }
         do { try p.start() } catch { say("FAIL \(error)"); exit(4) }
         say("camera: \(p.camera.deviceName)")
@@ -39,7 +41,8 @@ enum CameraTest {
             say(String(format: "yaw mean %.2f sd %.3f   pitch mean %.2f sd %.3f", m(yaw), sd(yaw), m(pitch), sd(pitch)))
             say("max blendshapes: " + Blend.allCases.filter { blendMax[$0.rawValue] > 0.3 }.map { "\($0.modelName)=\(String(format: "%.2f", blendMax[$0.rawValue]))" }.joined(separator: " "))
         }
-        say(p.fps >= 25 && med <= 10 ? "PASS" : "CHECK (fps>=25, engine<=10ms expected)")
+        if px.count > 30 { let xs = px.dropFirst(15).map(\.x), ys = px.dropFirst(15).map(\.y); say(String(format: "pointer spread over run (a still head should be <= 3 px): x %.1f px, y %.1f px", xs.max()! - xs.min()!, ys.max()! - ys.min()!)) }
+        say(faces == 0 ? "NO FACE SEEN" : (p.fps >= 25 && med <= 10 ? "PASS" : "CHECK (fps>=25, engine<=10ms expected)"))
         exit(0)
     }
 }

@@ -3,11 +3,27 @@ import SwiftUI
 struct HeadClickApp: App {
     @StateObject private var model = AppModel.shared
 
-    init() { Task { @MainActor in AppModel.shared.bootstrap(); if CommandLine.arguments.contains("--show-debug") { Windows.showDebug() }; Snapshot.scheduleIfRequested(CommandLine.arguments) } }
+    init() {
+        Task { @MainActor in
+            AppModel.shared.bootstrap()
+            if CommandLine.arguments.contains("--show-debug") { Windows.showDebug() }
+            Snapshot.scheduleIfRequested(CommandLine.arguments)
+        }
+    }
 
     var body: some Scene {
-        MenuBarExtra("HeadClick", systemImage: "face.smiling") {
+        MenuBarExtra("HeadClick", systemImage: model.live.paused ? "pause.circle" : "face.smiling") {
             Text(model.status)
+            if !model.accessibilityOK {
+                Button("Grant Accessibility (needed to move the cursor)…") { model.requestAccessibility() }
+            }
+            Divider()
+            Button(model.live.paused ? "Resume   ⌃⌥P" : "Pause   ⌃⌥P") { model.togglePause() }
+            Button("Recenter cursor   ⌃⌥R") { model.controller.recenter() }
+            Picker("Profile", selection: $model.profile) {
+                ForEach(model.profiles, id: \.name) { Text($0.name).tag($0) }
+            }
+            Toggle("Filming overlay   ⌃⌥O", isOn: $model.overlayOn)
             Divider()
             Button("Debug window") { Windows.showDebug() }
             Divider()

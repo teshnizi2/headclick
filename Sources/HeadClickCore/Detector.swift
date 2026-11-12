@@ -121,7 +121,7 @@ public final class SwingCounter {
     }
 }
 
-/// Spots speech: the jaw opening and closing 4+ times in one second.
+/// Spots speech: the jaw swinging open/closed 3+ times in one second (a deliberate tap is 2 swings).
 public final class TalkGuard {
     private let counter = SwingCounter(amplitude: 0.06, reversal: 0.02)
     public private(set) var talkingUntil = -1.0
@@ -131,7 +131,7 @@ public final class TalkGuard {
     public func update(t: Double, jawOpen: Float) {
         if counter.update(t: t, jawOpen) != nil {
             let recent = counter.swings.filter { t - $0.tEnd <= 1.0 && $0.tEnd - $0.tStart <= 0.35 }
-            if recent.count >= 4 { talkingUntil = t + 1.0 }
+            if recent.count >= 3 { talkingUntil = t + 1.0 }
         }
     }
 }

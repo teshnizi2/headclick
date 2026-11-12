@@ -4,7 +4,7 @@ import ApplicationServices
 
 /// One Euro filter (Casiez et al.): smooth when still, responsive when moving.
 public struct OneEuro {
-    public var minCutoff = 0.8, beta = 0.04, dCutoff = 1.0
+    public var minCutoff = 0.4, beta = 0.04, dCutoff = 1.0
     private var x: Double?, dx = 0.0, t = 0.0
     public init() {}
     public mutating func reset() { x = nil; dx = 0 }

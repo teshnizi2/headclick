@@ -5,7 +5,7 @@ public final class Pipeline {
     public let camera = Camera()
     public private(set) var engine: FaceEngine?
     /// Called on the camera queue for every processed frame; `nil` means no face was found.
-    public var onResult: ((FaceFrame?) -> Void)?
+    public var onResult: ((FaceFrame?, Double) -> Void)?
     public private(set) var fps: Double = 0
     public private(set) var engineMs: Double = 0
     public private(set) var framesSeen = 0
@@ -29,10 +29,10 @@ public final class Pipeline {
         do {
             let frame = try engine?.detect(rgba: rgba, width: w, height: h, time: t)
             if let f = frame { engineMs = engineMs == 0 ? f.engineMs : engineMs * 0.9 + f.engineMs * 0.1 }
-            onResult?(frame)
+            onResult?(frame, t)
         } catch {
             lastError = "\(error)"
-            onResult?(nil)
+            onResult?(nil, t)
         }
     }
 }

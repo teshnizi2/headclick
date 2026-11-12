@@ -39,7 +39,7 @@ public enum Trigger: String, Codable, CaseIterable {
     }
 }
 
-public struct Binding: Codable, Equatable, Identifiable {
+public struct GestureBinding: Codable, Equatable, Hashable, Identifiable {
     public var action: Action
     public var gesture: GestureID
     public var trigger: Trigger
@@ -56,7 +56,7 @@ public enum Sensitivity: String, Codable, CaseIterable {
 }
 
 /// Per-gesture user data: calibrated levels, sensitivity and the result of the talk test.
-public struct GestureTuning: Codable, Equatable {
+public struct GestureTuning: Codable, Equatable, Hashable {
     public var neutral: Float?
     public var peak: Float?
     public var onThreshold: Float?
@@ -64,7 +64,7 @@ public struct GestureTuning: Codable, Equatable {
     public init() {}
 }
 
-public struct PointerSettings: Codable, Equatable {
+public struct PointerSettings: Codable, Equatable, Hashable {
     /// Pixels per degree of head turn. Set by pointer calibration.
     public var gainX: Double = 55
     public var gainY: Double = 65
@@ -78,9 +78,9 @@ public struct PointerSettings: Codable, Equatable {
     public init() {}
 }
 
-public struct Profile: Codable, Equatable {
+public struct Profile: Codable, Equatable, Hashable {
     public var name: String
-    public var bindings: [Binding]
+    public var bindings: [GestureBinding]
     public var tuning: [String: GestureTuning] = [:]
     public var pointer = PointerSettings()
     /// Swap what MediaPipe calls left/right (set from the wink check if your left wink moves the right one).
@@ -88,37 +88,37 @@ public struct Profile: Codable, Equatable {
     public var talkGuard = true
     public var gazeJump = false
 
-    public init(name: String, bindings: [Binding]) { self.name = name; self.bindings = bindings }
+    public init(name: String, bindings: [GestureBinding]) { self.name = name; self.bindings = bindings }
 
-    public func binding(for action: Action) -> Binding? { bindings.first { $0.action == action } }
+    public func binding(for action: Action) -> GestureBinding? { bindings.first { $0.action == action } }
     public func tuning(_ g: GestureID) -> GestureTuning { tuning[g.rawValue] ?? GestureTuning() }
     public mutating func setBinding(_ action: Action, gesture: GestureID?, trigger: Trigger) {
         bindings.removeAll { $0.action == action }
-        if let gesture { bindings.append(Binding(action, gesture, trigger)) }
+        if let gesture { bindings.append(GestureBinding(action, gesture, trigger)) }
     }
 
     public static let quietDesk = Profile(name: "Quiet desk", bindings: [
-        Binding(.leftClick, .mouthOpen, .tap), Binding(.drag, .mouthOpen, .hold),
-        Binding(.rightClick, .pucker, .tap), Binding(.doubleClick, .browRaise, .tap),
-        Binding(.scrollUp, .tiltLeft, .continuous), Binding(.scrollDown, .tiltRight, .continuous),
-        Binding(.pauseToggle, .longBlink, .long), Binding(.recenter, .headShake, .tap),
+        GestureBinding(.leftClick, .mouthOpen, .tap), GestureBinding(.drag, .mouthOpen, .hold),
+        GestureBinding(.rightClick, .pucker, .tap), GestureBinding(.doubleClick, .browRaise, .tap),
+        GestureBinding(.scrollUp, .tiltLeft, .continuous), GestureBinding(.scrollDown, .tiltRight, .continuous),
+        GestureBinding(.pauseToggle, .longBlink, .long), GestureBinding(.recenter, .headShake, .tap),
     ])
     public static let talkSafe = Profile(name: "Talk-safe", bindings: [
-        Binding(.leftClick, .winkLeft, .tap), Binding(.rightClick, .winkRight, .tap),
-        Binding(.doubleClick, .doubleBlink, .tap), Binding(.drag, .winkLeft, .hold),
-        Binding(.scrollUp, .tiltLeft, .continuous), Binding(.scrollDown, .tiltRight, .continuous),
-        Binding(.pauseToggle, .longBlink, .long), Binding(.recenter, .headShake, .tap),
+        GestureBinding(.leftClick, .winkLeft, .tap), GestureBinding(.rightClick, .winkRight, .tap),
+        GestureBinding(.doubleClick, .doubleBlink, .tap), GestureBinding(.drag, .winkLeft, .hold),
+        GestureBinding(.scrollUp, .tiltLeft, .continuous), GestureBinding(.scrollDown, .tiltRight, .continuous),
+        GestureBinding(.pauseToggle, .longBlink, .long), GestureBinding(.recenter, .headShake, .tap),
     ])
     public static let eyesOnly = Profile(name: "Eyes only", bindings: [
-        Binding(.leftClick, .doubleBlink, .tap), Binding(.rightClick, .longBlink, .tap),
-        Binding(.scrollUp, .tiltLeft, .continuous), Binding(.scrollDown, .tiltRight, .continuous),
-        Binding(.pauseToggle, .longBlink, .long), Binding(.recenter, .headShake, .tap),
+        GestureBinding(.leftClick, .doubleBlink, .tap), GestureBinding(.rightClick, .longBlink, .tap),
+        GestureBinding(.scrollUp, .tiltLeft, .continuous), GestureBinding(.scrollDown, .tiltRight, .continuous),
+        GestureBinding(.pauseToggle, .longBlink, .long), GestureBinding(.recenter, .headShake, .tap),
     ])
     public static let expressive = Profile(name: "Expressive", bindings: [
-        Binding(.leftClick, .smile, .tap), Binding(.rightClick, .smirkRight, .tap),
-        Binding(.doubleClick, .browRaise, .tap), Binding(.drag, .cheekPuff, .hold),
-        Binding(.scrollUp, .mouthLeft, .continuous), Binding(.scrollDown, .mouthRight, .continuous),
-        Binding(.pauseToggle, .longBlink, .long), Binding(.recenter, .headShake, .tap),
+        GestureBinding(.leftClick, .smile, .tap), GestureBinding(.rightClick, .smirkRight, .tap),
+        GestureBinding(.doubleClick, .browRaise, .tap), GestureBinding(.drag, .cheekPuff, .hold),
+        GestureBinding(.scrollUp, .mouthLeft, .continuous), GestureBinding(.scrollDown, .mouthRight, .continuous),
+        GestureBinding(.pauseToggle, .longBlink, .long), GestureBinding(.recenter, .headShake, .tap),
     ])
     public static let builtIn: [Profile] = [quietDesk, talkSafe, eyesOnly, expressive]
 }

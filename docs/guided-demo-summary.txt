@@ -1,0 +1,16 @@
+HeadClick guided run, 2026-11-13 19:01
+*** DEMO: synthetic face, not a real run ***
+Profile: Quiet desk
+
+✓ Camera: I could see a steady face (face fills 23% of the picture width); 30 fps, engine 8.2 ms (p95 8.2)
+✓ Pointer: reached 5 of 5 dots; head-still jitter 0.0 px across, 0.0 px up/down
+· Pointer calibration: Pointer calibrated. Comfortable range: yaw 27°, pitch 16°. Gain 59 / 66 px per degree. Still-head jitter 0.00° (dead zone 0.06°).
+✓ Left click: Mouth open (quick), 3 of 3 times, strongest 100%
+✓ Right click: Pucker (kiss) (quick), 3 of 3 times, strongest 100%
+✓ Double click: Raise eyebrows (quick), 3 of 3 times, strongest 100%
+✓ Scroll down: Head tilt right (while held), 3 of 3 times, strongest 100%
+✗ Pause / resume: Long blink (eyes closed) (hold 1.2 s), 0 of 3 times, strongest 0%. Only 0 of 3. The meter peaked at 0%, below the 50% line: make the face bigger, or press Calibrate this gesture.
+✓ Gaze: mean error 0.3 cm. Good enough for gaze jump.
+✓ Misfires while you only looked and moved your head: none
+
+Cursor control was OFF during the whole guide (the guide draws its own pointer dot).

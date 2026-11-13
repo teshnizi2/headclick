@@ -22,6 +22,10 @@ final class AppModel: ObservableObject {
     @Published var firedAt: [Action: Date] = [:]
     @Published var calibrator: Calibrator?
     @Published var gazeSummary = ""
+    @Published var guide: GuidedRun?
+    @Published var preview: CGImage?
+    private var guideWindow: GuideWindow?
+    var guideDemo: GuideDemo?
     private var calibratorRef: Calibrator?
     private var pausedBeforeCalibration = false
     @Published var overlayOn = false { didSet { Overlay.shared.set(visible: overlayOn) } }
@@ -79,6 +83,11 @@ final class AppModel: ObservableObject {
         Hotkeys.shared.register(key: kVK_ANSI_O) { [weak self] in self?.overlayOn.toggle() }
         Hotkeys.shared.register(key: kVK_ANSI_R) { [weak self] in self?.controller.recenter() }
         if !CursorDriver.isTrusted && !CommandLine.arguments.contains("--snapshot") { CursorDriver.requestTrust() }
+        let a = CommandLine.arguments
+        if !UserDefaults.standard.bool(forKey: "HeadClick.guideSeen"), !GuideDemo.enabled, !["--test-seconds", "--snapshot", "--selftest", "--camera-test"].contains(where: a.contains) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in self?.startGuide() }
+        }
+        if GuideDemo.enabled { return }      // the demo uses a scripted fake user, never the camera
         switch Camera.authorization {
         case .authorized: startPipeline()
         case .notDetermined:
@@ -160,6 +169,64 @@ final class AppModel: ObservableObject {
         applyGaze()
     }
 
+    // MARK: guided start
+    /// Where the summary files go: `<app>/docs` next to the build folder, else the app support folder.
+    static var guideDocsDir: URL {
+        let exeDocs = Bundle.main.bundleURL.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("docs")
+        if FileManager.default.fileExists(atPath: exeDocs.appendingPathComponent("webgrid.html").path) { return exeDocs }
+        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("HeadClick")
+    }
+
+    func startGuide(demo: Bool = false, profile demoProfile: Profile? = nil) {
+        if let w = guideWindow { w.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); return }
+        guard let scr = NSScreen.main else { return }
+        endCalibration(calibratorRef, apply: false)
+        if gazeWindow != nil { endGazeCalibration(apply: false) }
+        UserDefaults.standard.set(true, forKey: "HeadClick.guideSeen")
+        controller.setPaused(true, toast: false)           // the real cursor is never driven during the guide
+        let sizeMM = CGDisplayScreenSize(CGMainDisplayID())
+        let widthCm = sizeMM.width > 0 ? Double(sizeMM.width) / 10 : 30
+        let run = GuidedRun(profile: demoProfile ?? profile, screen: CGRect(origin: .zero, size: scr.frame.size), widthCm: widthCm)
+        if demo { run.label = "DEMO: synthetic face, not a real run" }
+        run.onSummary = { [weak self] in self?.guideSummaryReached(demo: demo) }
+        guide = run
+        if !demo { pipeline.onPreview = { [weak self] img in DispatchQueue.main.async { self?.preview = img } } }
+        let w = GuideWindow(contentRect: scr.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        w.level = .floating; w.isReleasedWhenClosed = false; w.backgroundColor = .black
+        w.title = "HeadClick guide"
+        w.onEscape = { [weak self] in self?.endGuide() }
+        w.contentView = NSHostingView(rootView: GuideView(run: run, stop: { [weak self] in self?.endGuide() }, startControl: { [weak self] in self?.startControlFromGuide() }))
+        guideWindow = w
+        w.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func guideSummaryReached(demo: Bool) {
+        guard let run = guide else { return }
+        if run.profileChanged { profile = run.profile }
+        if let e = run.gazeEstimator { jumper.estimator.adopt(e); jumper.estimator.save(); applyGaze() }
+        let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd-HHmm"
+        let dir = AppModel.guideDocsDir
+        let url = dir.appendingPathComponent(demo ? "guided-demo-summary.txt" : "guided-run-\(df.string(from: Date())).txt")
+        run.writeSummary(to: url)
+        if !demo { try? FileManager.default.copyItem(at: url, to: dir.appendingPathComponent("guided-run-latest.txt")) }
+    }
+
+    /// Closes the guide. Cursor control stays off (paused).
+    func endGuide() {
+        guard guide != nil else { return }
+        guideWindow?.orderOut(nil); guideWindow = nil
+        pipeline.onPreview = nil; preview = nil
+        guide = nil; guideDemo = nil
+    }
+
+    func startControlFromGuide() {
+        guard CursorDriver.isTrusted else { requestAccessibility(); showToast("Allow Accessibility, then press the button again"); return }
+        endGuide()
+        SafetyGuard.shared.graceUntil = Date().addingTimeInterval(1.5)
+        controller.pointer.warp(to: controller.sink.currentPosition)     // start from where the real cursor is
+        controller.setPaused(false)
+    }
+
     func togglePause() {
         if controller.paused { SafetyGuard.shared.graceUntil = Date().addingTimeInterval(1.0) }
         controller.setPaused(!controller.paused)
@@ -170,7 +237,10 @@ final class AppModel: ObservableObject {
     private func startPipeline() {
         pipeline.onResult = { [weak self] f, t in
             guard let self else { return }
-            self.controller.process(f, now: t)
+            let fpsNow = self.pipeline.fps, msNow = self.pipeline.engineMs
+            // While the guided start is open it gets the frames and the real controller gets none (it stays paused).
+            if let g = self.guide { DispatchQueue.main.async { g.feed(f, now: t, fps: fpsNow, engineMs: msNow) } }
+            else { self.controller.process(f, now: t) }
             if let cal = self.calibratorRef { DispatchQueue.main.async { cal.feed(f, now: t) } }
             if let gc = self.gazeCal { DispatchQueue.main.async { gc.feed(f, now: t) } }
             let now = CFAbsoluteTimeGetCurrent()
@@ -197,28 +267,34 @@ final class AppModel: ObservableObject {
 /// `--snapshot <title-substring> <out.png> [delay]`: after a delay, renders the matching window of this app to a PNG
 /// (no Screen Recording permission needed) and quits. Used for the screenshots in docs/.
 enum Snapshot {
+    /// Renders the window's content to a PNG (the overlay is composited over a grey backdrop so it is readable).
+    static func write(window w: NSWindow, to out: String) {
+        guard let v = w.contentView, let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { print("snapshot: cannot render \(w.title)"); return }
+        w.appearance = NSAppearance(named: .aqua)
+        v.displayIfNeeded()
+        v.cacheDisplay(in: v.bounds, to: rep)
+        var data = rep.representation(using: .png, properties: [:])
+        if w is NSPanel {
+            let img = NSImage(size: v.bounds.size)
+            img.lockFocus()
+            NSColor(calibratedWhite: 0.55, alpha: 1).setFill(); NSRect(origin: .zero, size: v.bounds.size).fill()
+            rep.draw(in: NSRect(origin: .zero, size: v.bounds.size))
+            img.unlockFocus()
+            if let t = img.tiffRepresentation, let r = NSBitmapImageRep(data: t) { data = r.representation(using: .png, properties: [:]) }
+        }
+        try? data?.write(to: URL(fileURLWithPath: out))
+    }
+
     static func scheduleIfRequested(_ args: [String]) {
         guard let i = args.firstIndex(of: "--snapshot"), args.count > i + 2 else { return }
         let title = args[i + 1], out = args[i + 2]
         let delay = args.count > i + 3 ? Double(args[i + 3]) ?? 8 : 8
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
             let wins = NSApp.windows.filter { $0.title.contains(title) || ($0.contentView?.window?.identifier?.rawValue.contains(title) ?? false) }
-            guard let w = wins.first, let v = w.contentView, let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else {
+            guard let w = wins.first else {
                 print("snapshot: no window matching \(title); windows: \(NSApp.windows.map { $0.title })"); NSApp.terminate(nil); return
             }
-            w.appearance = NSAppearance(named: .aqua)
-            v.displayIfNeeded()
-            v.cacheDisplay(in: v.bounds, to: rep)
-            var data = rep.representation(using: .png, properties: [:])
-            if w is NSPanel {   // the overlay is transparent: composite it over a desktop-grey backdrop so the picture is readable
-                let img = NSImage(size: v.bounds.size)
-                img.lockFocus()
-                NSColor(calibratedWhite: 0.55, alpha: 1).setFill(); NSRect(origin: .zero, size: v.bounds.size).fill()
-                rep.draw(in: NSRect(origin: .zero, size: v.bounds.size))
-                img.unlockFocus()
-                if let t = img.tiffRepresentation, let r = NSBitmapImageRep(data: t) { data = r.representation(using: .png, properties: [:]) }
-            }
-            try? data?.write(to: URL(fileURLWithPath: out))
+            write(window: w, to: out)
             NSApp.terminate(nil)
         }
     }

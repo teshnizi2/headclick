@@ -48,7 +48,9 @@ public final class GazeEstimator: Codable {
         for s in samples { for i in 0..<n { mu[i] += s.0[i] } }
         mu = mu.map { $0 / Double(samples.count) }
         for s in samples { for i in 0..<n { sd[i] += (s.0[i] - mu[i]) * (s.0[i] - mu[i]) } }
-        sd = sd.map { max(1e-6, ($0 / Double(samples.count)).squareRoot()) }
+        // Floors: if the head hardly moved during calibration, its weights must not blow up when it moves later.
+        let floors: [Double] = n == 10 ? [0.005, 0.005, 0.005, 0.005, 0.005, 0.005, 2.0, 2.0, 0.02, 0.02] : [Double](repeating: 1e-6, count: n)
+        sd = (0..<n).map { max(floors[$0], (sd[$0] / Double(samples.count)).squareRoot()) }
         let m = n + 1
         var A = [[Double]](repeating: [Double](repeating: 0, count: m), count: m)
         var bx = [Double](repeating: 0, count: m), by = bx
@@ -61,6 +63,9 @@ public final class GazeEstimator: Codable {
         guard let sx = GazeEstimator.solve(A, bx), let sy = GazeEstimator.solve(A, by) else { return }
         mean = mu; std = sd; wx = sx; wy = sy
     }
+
+    /// Drift fix: moves every estimate by (dx, dy) screen points (the bias term).
+    public func shiftBias(dx: Double, dy: Double) { guard isCalibrated else { return }; wx[0] += dx; wy[0] += dy }
 
     public func estimate(_ feat: [Double]) -> CGPoint? {
         guard isCalibrated, feat.count == mean.count else { return nil }
@@ -154,7 +159,21 @@ public final class GazeCalibrator: ObservableObject {
     public private(set) var meanErrorCm = 0.0
     public private(set) var phase = Phase.calibrate
 
-    static let settle = 0.9, collect = 1.1
+    /// Seconds per dot. `standard` is the menu calibration; `guide` keeps the 9 dots under 10 s and the 4 check dots under 10 s.
+    public struct Timing {
+        public var settle: Double, collect: Double, checkSettle: Double, checkCollect: Double, minSamples: Int
+        public init(settle: Double, collect: Double, checkSettle: Double, checkCollect: Double, minSamples: Int) {
+            self.settle = settle; self.collect = collect; self.checkSettle = checkSettle; self.checkCollect = checkCollect; self.minSamples = minSamples
+        }
+        public static let standard = Timing(settle: 0.45, collect: 0.6, checkSettle: 0.6, checkCollect: 0.9, minSamples: 5)   // 9 dots in 9.5 s, 4 check dots in 6 s
+        public static let guide = Timing(settle: 0.45, collect: 0.6, checkSettle: 0.6, checkCollect: 0.9, minSamples: 5)
+    }
+    public let timing: Timing
+    var settle: Double { phase == .check ? timing.checkSettle : timing.settle }
+    var collect: Double { phase == .check ? timing.checkCollect : timing.collect }
+    /// Seconds all 9 calibration dots take / all 4 check dots take (what the guide promises: each at most 10).
+    public var calibrationSeconds: Double { 9 * (timing.settle + timing.collect) }
+    public var checkSeconds: Double { 4 * (timing.checkSettle + timing.checkCollect) }
     let calPoints: [CGPoint], checkPoints: [CGPoint]
     var index = 0
     var stepStart: Double?
@@ -162,7 +181,8 @@ public final class GazeCalibrator: ObservableObject {
     var samples: [([Double], CGPoint)] = []
     var errors: [Double] = []
 
-    public init(screen: CGRect, screenWidthCm: Double) {
+    public init(screen: CGRect, screenWidthCm: Double, timing: Timing = .standard) {
+        self.timing = timing
         self.screen = screen
         cmPerPx = screenWidthCm / Double(screen.width)
         func pt(_ fx: Double, _ fy: Double) -> CGPoint { CGPoint(x: screen.minX + screen.width * fx, y: screen.minY + screen.height * fy) }
@@ -177,17 +197,17 @@ public final class GazeCalibrator: ObservableObject {
         guard !finished else { return }
         if stepStart == nil { stepStart = now }
         let t = now - stepStart!
-        progress = min(1, t / (Self.settle + Self.collect))
-        if t >= Self.settle, let f, let x = GazeFeatures.extract(f) { feats.append(x) }
-        guard t >= Self.settle + Self.collect else { return }
+        progress = min(1, t / (settle + collect))
+        if t >= settle, let f, let x = GazeFeatures.extract(f) { feats.append(x) }
+        guard t >= settle + collect else { return }
         completeStep()
     }
 
     func completeStep() {
         let n = feats.count
         stepStart = nil
-        guard n >= 8 else {
-            if n < 8 { fail("Face or eyes not tracked well enough at point \(index + 1). Sit centred, keep the screen lit and try again.") }
+        guard n >= timing.minSamples else {
+            if n < timing.minSamples { fail("Face or eyes not tracked well enough at point \(index + 1). Sit centred, keep the screen lit and try again.") }
             return
         }
         switch phase {
@@ -211,7 +231,7 @@ public final class GazeCalibrator: ObservableObject {
             phase = .done; finished = true
             let px = meanErrorCm / cmPerPx
             result = String(format: "Mean gaze error %.1f cm (%.0f px) over %d check points. %@", meanErrorCm, px, errors.count,
-                            meanErrorCm < 4 ? "Good enough for gaze jump." : "Rough: gaze jump will land near the target and the head fine-tunes. Try again sitting closer and more centred.")
+                            meanErrorCm < 4 ? "Good enough: the cursor will follow your eyes." : "Rough: the cursor will land near where you look. Try again sitting closer and more centred.")
         case .done: break
         }
     }

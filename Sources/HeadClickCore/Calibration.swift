@@ -102,7 +102,11 @@ public final class Calibrator: ObservableObject {
             rangePitch = (percentile(pitches, 0.05), percentile(pitches, 0.95))
             finishPointer()
         case .gestureNeutral:
-            neutralLevel = percentile(raws, 0.95); raws = []
+            // Rest = what the face does most of the time. Eye gestures use the median: natural blinks (a few per 3 s)
+            // would push a p95 up to the "closed" level (0.64 on MediaPipe) and make a firm eye close look too small.
+            // Others use p95 so noise and small twitches stay below the threshold.
+            guard case .gesture(let g) = kind else { break }
+            neutralLevel = percentile(raws, Catalog.spec(g).group == .eyes ? 0.5 : 0.95); raws = []
         case .rep:
             repPeaks.append(percentile(raws, 0.98)); raws = []
             if repPeaks.count == 3 { finishGesture() }

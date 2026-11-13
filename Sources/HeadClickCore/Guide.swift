@@ -12,8 +12,8 @@ public struct GestureTask: Equatable, Identifiable {
 }
 
 public enum GuideStep: Int, CaseIterable {
-    case camera, pointer, clicks, gaze, summary
-    public var title: String { ["Camera", "Pointer", "Clicks", "Gaze", "Summary"][rawValue] }
+    case camera, gaze, look, clicks, summary
+    public var title: String { ["Camera", "Eyes", "Look", "Clicks", "Summary"][rawValue] }
 }
 
 public enum StepOutcome: String { case pending, passed, failed, skipped }
@@ -26,16 +26,18 @@ public struct GestureResult {
     public var note = ""
 }
 
-/// The guided first run: camera check, pointer dots, each click gesture, optional gaze, summary.
+/// The guided first run: camera check, gaze calibration (required), look-at-the-dots check, each click gesture, summary.
 ///
 /// It is a pure state machine fed with camera frames and a clock (`feed`). It never touches the real cursor:
 /// every piece of tracking it does runs through throw-away `Controller`s whose sink only counts.
 /// All time limits are per action and at most 10 s.
 public final class GuidedRun: ObservableObject {
-    public enum Stage: Equatable { case camera, pointerCal, dot(Int), gesture(Int), gazeIntro, gazeCal, summary }
+    public enum Stage: Equatable { case camera, gazeIntro, gazeCal, dot(Int), gesture(Int), summary }
     public enum Phase: Equatable { case running, passed, failed }
 
-    public static let cameraLimit = 10.0, dotLimit = 7.0, centreLimit = 8.0, gestureLimit = 10.0, pointerCalLimit = 7.0
+    public static let cameraLimit = 10.0, dotLimit = 2.0, gestureLimit = 10.0, gazeIntroSeconds = 4.0
+    /// A dot counts as looked at when the gaze dot stays within this many cm of it for `dotDwell` seconds.
+    public static let reachCm = 4.5, dotDwell = 0.4
     public static let hitsNeeded = 3
     public static let dotNames = ["centre", "left", "right", "top", "bottom"]
 
@@ -60,6 +62,8 @@ public final class GuidedRun: ObservableObject {
     @Published public private(set) var threshold: Float = 0.5
     @Published public private(set) var hits = 0
     @Published public private(set) var calibrator: Calibrator?
+    /// Per dot: how far (cm) the closest 0.4 s of the gaze dot was from it.
+    @Published public private(set) var dotErrorsCm: [Double?] = [Double?](repeating: nil, count: 5)
     @Published public private(set) var calibratingGesture = false
     @Published public private(set) var gaze: GazeCalibrator?
     @Published public private(set) var summaryPath = ""
@@ -69,7 +73,6 @@ public final class GuidedRun: ObservableObject {
     public private(set) var faceWidth = 0.0
     public private(set) var dotOutcomes = [StepOutcome](repeating: .pending, count: 5)
     public private(set) var jitter: (x: Double, y: Double)?
-    public private(set) var pointerNote = ""
     public private(set) var gestureResults: [GestureResult]
     public private(set) var gazeOutcome = StepOutcome.pending
     public private(set) var gazeErrorCm: Double?
@@ -89,9 +92,12 @@ public final class GuidedRun: ObservableObject {
     private var restartAt: Double?
     private var steadySince: Double?, noFaceSince: Double?, lastPose: (Double, Float, Float)?
     private var faceSeen = false
-    private var pc: Controller?                 // pointer-dot controller (own pointer, no sink)
+    private var gp: GazePointer?                // the same smoothing the real cursor uses, but it only draws a dot here
     private var inSince: Double?
     private var dwell: [CGPoint] = []
+    private var errWindow: [(Double, Double)] = []
+    private var bestErr = Double.greatestFiniteMagnitude
+    private var dotJitters: [(Double, Double)] = []
     private var gc: Controller?                 // one gesture
     private var peak: Float = 0
     private var onSince: Double?, counted = false
@@ -105,15 +111,14 @@ public final class GuidedRun: ObservableObject {
         func pt(_ fx: Double, _ fy: Double) -> CGPoint { CGPoint(x: screen.minX + screen.width * fx, y: screen.minY + screen.height * fy) }
         dots = [pt(0.5, 0.5), pt(0.08, 0.5), pt(0.92, 0.5), pt(0.5, 0.15), pt(0.5, 0.82)]
         pointerPos = CGPoint(x: screen.midX, y: screen.midY)
-        var o: [Stage] = [.camera]
-        if !profile.pointer.calibrated { o.append(.pointerCal) }
+        var o: [Stage] = [.camera, .gazeIntro, .gazeCal]
         o += (0..<5).map { Stage.dot($0) }
         o += tasks.indices.map { Stage.gesture($0) }
-        o += [.gazeIntro, .gazeCal, .summary]
+        o += [.summary]
         order = o
-        stepStarts = [0, o.firstIndex { $0 == .pointerCal || $0 == .dot(0) }!]
+        stepStarts = [0, o.firstIndex(of: .gazeIntro)!, o.firstIndex(of: .dot(0))!]
             + tasks.indices.map { i in o.firstIndex(of: .gesture(i))! }
-            + [o.firstIndex(of: .gazeIntro)!, o.firstIndex(of: .summary)!]
+            + [o.firstIndex(of: .summary)!]
         enter(0, forward: true)
     }
 
@@ -132,18 +137,18 @@ public final class GuidedRun: ObservableObject {
     public var visibleStep: GuideStep {
         switch stage {
         case .camera: .camera
-        case .pointerCal, .dot: .pointer
-        case .gesture: .clicks
         case .gazeIntro, .gazeCal: .gaze
+        case .dot: .look
+        case .gesture: .clicks
         case .summary: .summary
         }
     }
     public func outcome(of step: GuideStep) -> StepOutcome {
         switch step {
         case .camera: return cameraOutcome
-        case .pointer: return Self.combine(dotOutcomes)
-        case .clicks: return gestureResults.isEmpty ? .skipped : Self.combine(gestureResults.map { $0.outcome })
         case .gaze: return gazeOutcome
+        case .look: return Self.combine(dotOutcomes)
+        case .clicks: return gestureResults.isEmpty ? .skipped : Self.combine(gestureResults.map { $0.outcome })
         case .summary: return stage == .summary ? .passed : .pending
         }
     }
@@ -175,10 +180,9 @@ public final class GuidedRun: ObservableObject {
     public func skip() {
         switch stage {
         case .camera: cameraOutcome = .skipped
-        case .pointerCal, .dot: for k in 0..<5 where dotOutcomes[k] != .passed { dotOutcomes[k] = .skipped }
+        case .dot: for k in 0..<5 where dotOutcomes[k] != .passed { dotOutcomes[k] = .skipped }
         case .gesture(let i): gestureResults[i].outcome = .skipped
-        case .gazeIntro, .gazeCal: gazeOutcome = .skipped
-        case .summary: return
+        case .gazeIntro, .gazeCal, .summary: return     // the eye calibration is required: no skipping
         }
         let next = stepStarts.first { $0 > index } ?? order.count - 1
         enter(next, forward: true)
@@ -208,25 +212,26 @@ public final class GuidedRun: ObservableObject {
             message = "Look at the screen. I am checking that I can see your face."
             secondsLeft = Self.cameraLimit
             makeMisfire()
-        case .pointerCal:
-            let c = Calibrator(kind: .pointer, profile: profile, screen: screen)
-            calibrator = c; message = c.prompt; secondsLeft = Self.pointerCalLimit
         case .dot(let k):
-            if k == 0 { dotOutcomes = [StepOutcome](repeating: .pending, count: 5); pc = nil; jitter = nil; makeMisfire() }
-            dotOutcomes[k] = .pending
-            if k > 0, pc == nil { makePointer() }
-            message = k == 0 ? "Look at the middle dot and keep your head still." : "Turn your head to look at the dot."
-            secondsLeft = k == 0 ? Self.centreLimit : Self.dotLimit
-            pointerPos = pc?.pointer.position ?? CGPoint(x: screen.midX, y: screen.midY)
+            if k == 0 { dotOutcomes = [StepOutcome](repeating: .pending, count: 5); dotErrorsCm = [Double?](repeating: nil, count: 5); dotJitters = []; jitter = nil; gp = nil; makeMisfire() }
+            dotOutcomes[k] = .pending; dotErrorsCm[k] = nil
+            if gp == nil, let e = gazeEstimator ?? gazeCalibratedElsewhere { gp = GazePointer(estimator: e) }
+            errWindow = []; bestErr = .greatestFiniteMagnitude
+            message = "Look at the dot. Keep your head wherever is comfortable."
+            secondsLeft = Self.dotLimit
+            if k == 0 { pointerPos = CGPoint(x: screen.midX, y: screen.midY) }
         case .gesture(let g):
             startGesture(g)
         case .gazeIntro:
             gazeOutcome = .pending
-            message = "Optional: look at each dot while keeping your head still. About 30 seconds."
+            message = "Next I learn where you look: follow each dot with your eyes."
+            secondsLeft = Self.gazeIntroSeconds
+            makeMisfire()
         case .gazeCal:
             gazeOutcome = .pending
             let c = GazeCalibrator(screen: CGRect(origin: .zero, size: screen.size), screenWidthCm: widthCm)
             gaze = c; message = c.prompt
+            makeMisfire()
         case .summary:
             summaryPath = ""
             onSummary?()
@@ -237,15 +242,6 @@ public final class GuidedRun: ObservableObject {
         let c = Controller(profile: profile, sink: CountingSink(), bounds: screen)
         c.onAction = { [weak self] a, g in self?.misfires["\(a.title) via \(Catalog.spec(g).title)", default: 0] += 1 }
         misfire = c
-    }
-
-    private func makePointer() {
-        var p = Profile(name: "guide", bindings: [])
-        p.pointer = profile.pointer
-        let c = Controller(profile: p, sink: CountingSink(), bounds: screen)
-        c.recenter()
-        pc = c
-        pointerPos = c.pointer.position
     }
 
     private func startGesture(_ g: Int) {
@@ -272,11 +268,14 @@ public final class GuidedRun: ObservableObject {
         if restartAt != nil { return }    // showing "Calibrated, trying again" for a moment
         switch stage {
         case .camera: feedMisfire(f, now); tickCamera(f, now, el)
-        case .pointerCal: feedMisfire(f, now); tickPointerCal(f, now, el)
         case .dot(let k): feedMisfire(f, now); tickDot(k, f, now, el)
         case .gesture(let g): tickGesture(g, f, now, el)
-        case .gazeIntro, .summary: break
-        case .gazeCal: tickGaze(f, now)
+        case .summary: break
+        case .gazeIntro:
+            feedMisfire(f, now)
+            secondsLeft = max(0, Self.gazeIntroSeconds - el)
+            if el >= Self.gazeIntroSeconds, allowAuto { advance(auto: true) }
+        case .gazeCal: feedMisfire(f, now); tickGaze(f, now)
         }
         if let a = advanceAt, now >= a { advanceAt = nil; if allowAuto { advance(auto: true) } }
     }
@@ -330,58 +329,49 @@ public final class GuidedRun: ObservableObject {
         }
     }
 
-    private func tickPointerCal(_ f: FaceFrame?, _ now: Double, _ el: Double) {
-        guard phase == .running, let c = calibrator else { return }
-        c.feed(f, now: now)
-        secondsLeft = max(0, Self.pointerCalLimit - el)
-        if !c.finished { message = c.prompt; return }
-        pointerNote = c.result
-        if c.failed {
-            finish(false, c.result + " Using the default pointer speed.", now: now, autoAfter: 2.5)
-        } else {
-            profile = c.apply(to: profile); profileChanged = true
-            finish(true, "Pointer speed measured for your head range.", now: now, autoAfter: 1.5)
-        }
-    }
+    /// Another estimator the app already has (loaded from disk) can be handed in, so the dots can be checked without recalibrating.
+    public var gazeCalibratedElsewhere: GazeEstimator?
 
     private func tickDot(_ k: Int, _ f: FaceFrame?, _ now: Double, _ el: Double) {
         guard phase == .running else { return }
-        let limit = k == 0 ? Self.centreLimit : Self.dotLimit
-        secondsLeft = max(0, limit - el)
-        if pc == nil {
-            // The pointer is relative, so wait until the head is still: that pose is "the middle".
-            if let f {
-                var speed = 0.0
-                if let l = lastPose, now > l.0 { speed = hypot(Double(f.yaw - l.1), Double(f.pitch - l.2)) / (now - l.0) }
-                lastPose = (now, f.yaw, f.pitch)
-                if speed < 25 { if steadySince == nil { steadySince = now } } else { steadySince = nil }
-                if let s = steadySince, now - s >= 0.6 { makePointer(); stageStart = now; inSince = nil }
-            } else { lastPose = nil; steadySince = nil }
-            if el >= limit { dotOutcomes[k] = .failed; finish(false, "I could not see a steady head.", now: now, autoAfter: 0.7) }
+        secondsLeft = max(0, Self.dotLimit - el)
+        guard let gp else {
+            dotOutcomes[k] = .skipped
+            finish(false, "No gaze calibration yet, so I cannot check where you look.", now: now, autoAfter: 0.3)
             return
         }
-        let c = pc!
-        c.process(f, now: now)
-        if f != nil, c.snapshot().autoPaused { c.setPaused(false, toast: false) }
-        let pos = c.pointer.position
-        pointerPos = pos
-        let need = k == 0 ? 1.5 : 0.5
-        if hypot(pos.x - dots[k].x, pos.y - dots[k].y) < 90, f != nil {
+        let cmPerPx = widthCm / Double(screen.width)
+        if let f {
+            let closed = max(f[.eyeBlinkLeft], f[.eyeBlinkRight]) > 0.4
+            if let p = gp.update(f, now: now, eyesClosed: closed) { pointerPos = p }
+        }
+        let err = hypot(Double(pointerPos.x - dots[k].x), Double(pointerPos.y - dots[k].y)) * cmPerPx
+        // the best 0.3 s window (median error) is this dot's error: it ignores the time the eyes were still travelling
+        errWindow.append((now, err)); errWindow.removeAll { now - $0.0 > 0.3 }
+        if errWindow.count >= 5, now - errWindow[0].0 >= 0.25 {
+            let m = errWindow.map { $0.1 }.sorted()[errWindow.count / 2]
+            if el > 0.3 { bestErr = min(bestErr, m) }
+        }
+        let need = Self.dotDwell
+        if err < Self.reachCm, f != nil {
             if inSince == nil { inSince = now; dwell = [] }
-            dwell.append(pos)
+            dwell.append(pointerPos)
             dotProgress = min(1, (now - inSince!) / need)
             if now - inSince! >= need {
                 dotOutcomes[k] = .passed
-                if k == 0, dwell.count > 3 {
-                    jitter = (Double(dwell.map { $0.x }.max()! - dwell.map { $0.x }.min()!), Double(dwell.map { $0.y }.max()! - dwell.map { $0.y }.min()!))
+                dotErrorsCm[k] = min(bestErr, err)
+                if dwell.count > 3 {
+                    dotJitters.append((Double(dwell.map { $0.x }.max()! - dwell.map { $0.x }.min()!), Double(dwell.map { $0.y }.max()! - dwell.map { $0.y }.min()!)))
+                    jitter = (dotJitters.map { $0.0 }.reduce(0, +) / Double(dotJitters.count), dotJitters.map { $0.1 }.reduce(0, +) / Double(dotJitters.count))
                 }
-                finish(true, "Got it.", now: now, autoAfter: 0.7)
+                finish(true, "Got it.", now: now, autoAfter: 0.3)
                 return
             }
         } else { inSince = nil; dotProgress = 0 }
-        if el >= limit {
+        if el >= Self.dotLimit {
             dotOutcomes[k] = .failed
-            finish(false, "Missed this one.", now: now, autoAfter: 0.7)
+            dotErrorsCm[k] = bestErr < .greatestFiniteMagnitude ? bestErr : err
+            finish(false, String(format: "Missed: the closest I got was %.1f cm.", dotErrorsCm[k]!), now: now, autoAfter: 0.3)
         }
     }
 
@@ -441,7 +431,7 @@ public final class GuidedRun: ObservableObject {
             finish(false, c.result, now: now, autoAfter: nil)
         } else {
             gazeOutcome = .passed; gazeErrorCm = c.meanErrorCm; gazeEstimator = c.estimator
-            finish(true, c.result, now: now, autoAfter: 2.5)
+            finish(true, c.result, now: now, autoAfter: 2.0)
         }
     }
 
@@ -461,15 +451,18 @@ public final class GuidedRun: ObservableObject {
         if let f = Self.median(fpsSamples) { cam += String(format: "; %.0f fps", f) }
         if let m = Self.median(msSamples) { cam += String(format: ", engine %.1f ms (p95 %.1f)", m, Self.p95(msSamples) ?? m) }
         add(mark(cameraOutcome), cam)
-        // pointer
-        let po = outcome(of: .pointer)
+        // gaze calibration
+        if gazeOutcome == .passed, let cm = gazeErrorCm {
+            add("✓", String(format: "Eyes: calibrated, mean error %.1f cm. %@", cm, cm < 4 ? "Good enough: the cursor follows where you look." : "Rough: the cursor lands near where you look."))
+        } else if gazeOutcome == .failed { add("✗", "Eyes: \(gazeNote)") } else { add("✗", "Eyes: not calibrated, so the cursor cannot follow your gaze yet") }
+        // look-at-the-dots check
+        let lo = outcome(of: .look)
         let reached = dotOutcomes.filter { $0 == .passed }.count
-        let missed = (0..<5).filter { dotOutcomes[$0] == .failed }.map { Self.dotNames[$0] }
-        var ptr = po == .skipped ? "Pointer dots skipped" : "Pointer: reached \(reached) of 5 dots"
-        if !missed.isEmpty { ptr += " (missed: \(missed.joined(separator: ", ")))" }
-        if let j = jitter { ptr += String(format: "; head-still jitter %.1f px across, %.1f px up/down", j.x, j.y) }
-        add(mark(po == .passed && reached < 5 ? .failed : po), ptr)
-        if !pointerNote.isEmpty { add("·", "Pointer calibration: \(pointerNote)") }
+        let errs = dotErrorsCm.compactMap { $0 }
+        var look = lo == .skipped ? "Look-at-the-dots check skipped" : "Look check: reached \(reached) of 5 dots"
+        if !errs.isEmpty { look += String(format: ", error %.1f cm on average (worst %.1f cm)", errs.reduce(0, +) / Double(errs.count), errs.max()!) }
+        if let j = jitter { look += String(format: "; steady-gaze jitter %.0f px across, %.0f px up/down", j.x, j.y) }
+        add(mark(lo == .passed && reached < 5 ? .failed : lo), look)
         // gestures
         for r in gestureResults {
             let spec = Catalog.spec(r.task.gesture)
@@ -478,15 +471,11 @@ public final class GuidedRun: ObservableObject {
             if r.outcome == .failed, !r.note.isEmpty { s += ". " + r.note }
             add(mark(r.outcome), s)
         }
-        // gaze
-        if gazeOutcome == .passed, let cm = gazeErrorCm {
-            add("✓", String(format: "Gaze: mean error %.1f cm. %@", cm, cm < 4 ? "Good enough for gaze jump." : "Rough: gaze jump will land near, the head fine-tunes."))
-        } else if gazeOutcome == .failed { add("✗", "Gaze: \(gazeNote)") } else { add("–", "Gaze skipped (optional)") }
         // misfires
         let total = misfires.values.reduce(0, +)
-        if cameraOutcome == .skipped && outcome(of: .pointer) == .skipped { add("·", "Misfires: not measured (those steps were skipped)") }
-        else if total == 0 { add("✓", "Misfires while you only looked and moved your head: none") }
-        else { add("✗", "Misfires while you only looked and moved your head: " + misfires.sorted { $0.key < $1.key }.map { "\($0.key) ×\($0.value)" }.joined(separator: ", ")) }
+        if cameraOutcome == .skipped && outcome(of: .look) == .skipped { add("·", "Misfires: not measured (those steps were skipped)") }
+        else if total == 0 { add("✓", "Misfires while you only looked around: none") }
+        else { add("✗", "Misfires while you only looked around: " + misfires.sorted { $0.key < $1.key }.map { "\($0.key) ×\($0.value)" }.joined(separator: ", ")) }
         return L
     }
 

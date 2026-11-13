@@ -49,7 +49,8 @@ final class GazeTests: XCTestCase {
         }
         XCTAssertTrue(cal.finished); XCTAssertFalse(cal.failed, cal.result)
         XCTAssertLessThan(cal.meanErrorCm, 2.0, cal.result)
-        XCTAssertGreaterThan(t, 9 * 2 * 0.9)
+        XCTAssertGreaterThan(t, 9 * 1.0, "9 calibration dots take about 9.5 s")
+        XCTAssertLessThan(t, 17, "13 dots in under 17 s")
     }
 
     func testJumperJumpsOnlyWhenFarAndStable() throws {

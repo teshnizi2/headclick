@@ -25,7 +25,7 @@ final class GuideTests: XCTestCase {
         XCTAssertEqual(g.stage, .camera)
         run(g, GuideSynthUser()) { $0.stage != .camera }
         XCTAssertEqual(g.cameraOutcome, .passed)
-        XCTAssertEqual(g.stage, .dot(0))
+        XCTAssertEqual(g.stage, .gazeIntro)
         XCTAssertEqual(g.faceWidth, 0.36, accuracy: 0.01)
     }
 
@@ -51,30 +51,47 @@ final class GuideTests: XCTestCase {
         XCTAssertNotEqual(g3.cameraOutcome, .passed)
     }
 
-    func testPointerCalibrationRunsWhenNotCalibratedThenDotsAreReached() {
-        var p = Profile.quietDesk; p.pointer = PointerSettings()   // not calibrated
-        let g = GuidedRun(profile: p, screen: scr)
-        XCTAssertTrue(g.order.contains(.pointerCal))
-        let u = GuideSynthUser()
-        run(g, u) { $0.stage == .dot(0) }
-        XCTAssertTrue(g.profile.pointer.calibrated, g.pointerNote)
-        XCTAssertTrue(g.profileChanged)
-        run(g, u, from: 100) { if case .gesture = $0.stage { return true }; return false }
-        XCTAssertEqual(g.dotOutcomes, [StepOutcome](repeating: .passed, count: 5), "dots: \(g.dotOutcomes)")
-        XCTAssertLessThan(g.jitter!.x, 5); XCTAssertLessThan(g.jitter!.y, 5)
+    func testGuideOrderIsCameraEyesLookClicksSummary() {
+        let g = GuidedRun(profile: calibratedProfile(), screen: scr)
+        XCTAssertEqual(Array(g.order.prefix(3)), [.camera, .gazeIntro, .gazeCal])
+        XCTAssertEqual(Array(g.order[3..<8]), (0..<5).map { GuidedRun.Stage.dot($0) })
+        XCTAssertEqual(g.order.last, .summary)
+        XCTAssertEqual(GuideStep.allCases.map { $0.title }, ["Camera", "Eyes", "Look", "Clicks", "Summary"])
     }
 
-    func testDotsMissedWhenHeadDoesNotMove() {
-        let g = GuidedRun(profile: calibratedProfile(), screen: scr)
-        var t = 0.0
-        // steady face the whole time: centre is reached, the others time out after 7 s each
+    func testEyeCalibrationThenDotsAreReachedWithTheHeadWandering() {
+        let g = GuidedRun(profile: calibratedProfile(), screen: scr, widthCm: 30)
+        let u = GuideSynthUser()
+        var yawSeen = 0.0
+        run(g, u) { if case .dot = $0.stage { yawSeen = max(yawSeen, abs(u.yaw)) }; if case .gesture = $0.stage { return true }; return false }
+        XCTAssertEqual(g.gazeOutcome, .passed, g.gazeNote)
+        XCTAssertGreaterThan(yawSeen, 3, "the fake head turned while the eyes looked at the dots")
+        XCTAssertEqual(g.dotOutcomes, [StepOutcome](repeating: .passed, count: 5), "dots: \(g.dotOutcomes) errors \(g.dotErrorsCm)")
+        for e in g.dotErrorsCm { XCTAssertLessThan(e ?? 99, GuidedRun.reachCm) }
+        XCTAssertLessThan(g.jitter!.x, 40); XCTAssertLessThan(g.jitter!.y, 40)
+        XCTAssertTrue(g.summaryLines().contains { $0.text.contains("reached 5 of 5 dots") && $0.text.contains("cm") })
+    }
+
+    func testEachGuidePartFitsTenSeconds() {
+        let c = GazeCalibrator(screen: scr, screenWidthCm: 30)
+        XCTAssertLessThanOrEqual(c.calibrationSeconds, 10, "9 calibration dots")
+        XCTAssertLessThanOrEqual(c.checkSeconds, 10, "4 check dots")
+        XCTAssertLessThanOrEqual(GuidedRun.dotLimit * 5, 10, "5 look dots")
+    }
+
+    func testDotsMissedWhenTheEyesStayInTheMiddle() {
+        let g = GuidedRun(profile: calibratedProfile(), screen: scr, widthCm: 30)
+        let u = GuideSynthUser()
+        var t = run(g, u) { $0.stage == .dot(0) }
+        // eyes stay on the middle of the screen the whole time: the centre dot is reached, the others time out after 2 s each
         while g.stage != .gesture(0) && t < 200 {
             var f = FaceFrame(time: t); f.landmarks = GuideSynthUser.landmarks()
             g.feed(f, now: t); t += dt
         }
         XCTAssertEqual(g.dotOutcomes[0], .passed)
         XCTAssertEqual(Array(g.dotOutcomes[1...]), [StepOutcome](repeating: .failed, count: 4))
-        XCTAssertTrue(g.summaryLines().contains { $0.text.contains("missed: left, right, top, bottom") })
+        XCTAssertTrue(g.summaryLines().contains { $0.text.contains("reached 1 of 5 dots") })
+        XCTAssertGreaterThan(g.dotErrorsCm[1] ?? 0, 10, "the left dot is ~14 cm from where the eyes were")
     }
 
     func testEveryDefaultGestureIsCountedThreeTimes() {
@@ -82,7 +99,7 @@ final class GuideTests: XCTestCase {
             let g = GuidedRun(profile: calibratedProfile(profile), screen: scr)
             XCTAssertFalse(g.tasks.isEmpty)
             let u = GuideSynthUser()
-            run(g, u) { $0.stage == .gazeIntro }
+            run(g, u) { $0.stage == .summary }
             for r in g.gestureResults { XCTAssertEqual(r.outcome, .passed, "\(profile.name): \(r.task.action) via \(r.task.gesture) hits \(r.hits) peak \(r.peak)") }
         }
     }
@@ -120,44 +137,49 @@ final class GuideTests: XCTestCase {
         let g = GuidedRun(profile: calibratedProfile(), screen: scr)
         g.skip()
         XCTAssertEqual(g.cameraOutcome, .skipped)
-        XCTAssertEqual(g.stage, .dot(0))
-        XCTAssertFalse(g.canGoBack == false)
+        XCTAssertEqual(g.stage, .gazeIntro)
+        XCTAssertTrue(g.canGoBack)
+        g.skip()
+        XCTAssertEqual(g.stage, .gazeIntro, "the eye calibration is required: skip does nothing")
+        g.next(); XCTAssertEqual(g.stage, .gazeCal)
+        g.skip(); XCTAssertEqual(g.stage, .gazeCal)
+        g.next(); XCTAssertEqual(g.stage, .dot(0))
         g.skip()
         XCTAssertEqual(g.stage, .gesture(0))
         XCTAssertEqual(g.dotOutcomes, [StepOutcome](repeating: .skipped, count: 5))
         g.skip(); XCTAssertEqual(g.stage, .gesture(1))
         g.back(); XCTAssertEqual(g.stage, .gesture(0))
         g.back(); XCTAssertEqual(g.stage, .dot(0))
+        g.back(); XCTAssertEqual(g.stage, .gazeIntro)
         g.back(); XCTAssertEqual(g.stage, .camera)
         XCTAssertFalse(g.canGoBack)
-        // skipping the optional gaze goes to the summary
-        for _ in 0..<20 where g.stage != .gazeIntro { g.skip() }
-        g.skip()
+        // skipping everything optional ends at the summary, which says the eyes are not calibrated
+        for _ in 0..<30 where g.stage != .summary { if g.stage == .gazeIntro || g.stage == .gazeCal { g.next() } else { g.skip() } }
         XCTAssertEqual(g.stage, .summary)
-        XCTAssertEqual(g.gazeOutcome, .skipped)
+        XCTAssertNotEqual(g.gazeOutcome, .passed)
+        XCTAssertTrue(g.summaryLines().contains { $0.mark == "✗" && $0.text.contains("Eyes: not calibrated") })
     }
 
     func testBackToCameraDoesNotAutoAdvance() {
         let g = GuidedRun(profile: calibratedProfile(), screen: scr)
         let u = GuideSynthUser()
-        run(g, u) { $0.stage == .dot(0) }
+        run(g, u) { $0.stage == .gazeIntro }
         g.back()
         XCTAssertEqual(g.stage, .camera)
         run(g, u, from: 50) { _ in false }   // 400 s of steady face
         XCTAssertEqual(g.stage, .camera); XCTAssertEqual(g.phase, .passed)
-        g.next(); XCTAssertEqual(g.stage, .dot(0))
+        g.next(); XCTAssertEqual(g.stage, .gazeIntro)
     }
 
     func testGazeStepReportsErrorInCm() {
         let g = GuidedRun(profile: calibratedProfile(), screen: scr, widthCm: 30)
         let u = GuideSynthUser()
-        run(g, u) { $0.stage == .gazeIntro }
-        g.next()
-        XCTAssertEqual(g.stage, .gazeCal)
-        run(g, u, from: 300) { $0.stage == .summary }
+        run(g, u) { $0.stage == .gazeCal }
+        run(g, u, from: 300) { $0.stage == .dot(0) }
         XCTAssertEqual(g.gazeOutcome, .passed, g.gazeNote)
         XCTAssertLessThan(g.gazeErrorCm ?? 99, 2.0)
         XCTAssertNotNil(g.gazeEstimator)
+        XCTAssertTrue(g.summaryLines().contains { $0.text.contains("Eyes: calibrated, mean error") })
     }
 
     func testFullRunWritesSummaryFile() throws {
@@ -165,9 +187,7 @@ final class GuideTests: XCTestCase {
         var summaryCalls = 0
         g.onSummary = { summaryCalls += 1 }
         let u = GuideSynthUser(); u.failTasks = [2]
-        var t = run(g, u) { if $0.phase == .failed, case .gesture = $0.stage { $0.next() }; return $0.stage == .gazeIntro }
-        g.next()
-        t = run(g, u, from: t) { $0.stage == .summary }
+        run(g, u) { if $0.phase == .failed, case .gesture = $0.stage { $0.next() }; return $0.stage == .summary }
         XCTAssertEqual(summaryCalls, 1)
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("guided-run-test-\(UUID().uuidString).txt")
         XCTAssertTrue(g.writeSummary(to: url))
@@ -175,11 +195,11 @@ final class GuideTests: XCTestCase {
         XCTAssertTrue(text.contains("✓ Camera"), text)
         XCTAssertTrue(text.contains("reached 5 of 5 dots"), text)
         XCTAssertTrue(text.contains("jitter"), text)
+        XCTAssertTrue(text.contains("Eyes: calibrated"), text)
         XCTAssertTrue(text.contains("Left click: Mouth open"), text)
         XCTAssertTrue(text.contains("✗ Double click: Raise eyebrows"), text)
         XCTAssertTrue(text.contains("fps"), text)
-        XCTAssertTrue(text.contains("Gaze: mean error"), text)
-        XCTAssertTrue(text.contains("Misfires"), text)
+                XCTAssertTrue(text.contains("Misfires"), text)
         XCTAssertEqual(g.summaryPath, url.path)
         try? FileManager.default.removeItem(at: url)
         XCTAssertEqual(g.outcome(of: .clicks), .failed)
@@ -202,7 +222,7 @@ final class GuideTests: XCTestCase {
         let g = GuidedRun(profile: calibratedProfile(), screen: scr)
         let u = GuideSynthUser()
         let before = CursorDriver().currentPosition
-        run(g, u) { $0.stage == .gazeIntro }
+        run(g, u) { $0.stage == .summary }
         let after = CursorDriver().currentPosition
         XCTAssertEqual(before, after, "the real cursor did not move during a full guided run")
     }

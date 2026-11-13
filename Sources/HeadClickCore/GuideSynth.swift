@@ -2,7 +2,7 @@ import Foundation
 import CoreGraphics
 
 /// A scripted, fake user for the guide: used by the unit tests and by the app's `--guide-demo` mode (screenshots without a face).
-/// It looks at the screen like a person would: the head turns toward the current dot, and each click gesture is performed 3 times.
+/// It looks at the screen like a person would: the eyes go to the current dot (the head wanders a little), and each click gesture is performed 3 times.
 public final class GuideSynthUser {
     /// A real face frame (for the landmarks, so the mesh lines up with a real picture); blendshapes are zeroed.
     public var base: FaceFrame?
@@ -65,7 +65,10 @@ public final class GuideSynthUser {
         case .long: (on, period, start) = (1.5, 2.4, 0.5)
         case .continuous: (on, period, start) = (1.0, 1.8, 0.6)
         case .hold: (on, period, start) = (1.0, 1.8, 0.6)
-        case .tap: (on, period, start) = (0.5, 1.4, 0.6)
+        case .tap:
+            // long enough to count, short enough not to be a hold: the middle of the gesture's own tap window
+            let spec = Catalog.spec(task.gesture)
+            (on, period, start) = (max(0.5, min((spec.minHold + spec.maxHold) / 2, spec.maxHold - 0.15)), 1.6, 0.6)
         }
         guard t >= start else { return 0 }
         return (t - start).truncatingRemainder(dividingBy: period) < on ? 1 : 0
@@ -81,19 +84,10 @@ public final class GuideSynthUser {
         var toYaw = 0.0, toPitch = 0.0, rate = 0.08
         var gazeTarget: CGPoint?
         switch run.stage {
-        case .pointerCal:
-            if let c = run.calibrator, c.stepNumber >= 2 {
-                toYaw = 14 * sin(2 * .pi * c.progress * 1.5); toPitch = 8 * sin(2 * .pi * c.progress * 2.1 + 1); rate = 1
-            }
         case .dot(let k):
-            let s = run.profile.pointer
-            let dx = Double(run.dots[k].x - run.pointerPos.x), dy = Double(run.dots[k].y - run.pointerPos.y)
-            // Closed loop, like a person watching the cursor: turn toward the dot until the cursor is on it.
-            if abs(dx) + abs(dy) > 20 {
-                yaw += max(-0.5, min(0.5, 0.12 * dx / max(1, s.gainX))) * (s.invertX ? -1 : 1)
-                pitch += max(-0.4, min(0.4, 0.12 * dy / max(1, s.gainY))) * (s.invertY ? -1 : 1)
-            }
-            toYaw = yaw; toPitch = pitch; rate = 1
+            // Looks at the dot with the eyes while the head wanders a little: the cursor must not care.
+            gazeTarget = run.dots[k]
+            toYaw = 6 * sin(now * 2.3); toPitch = 3 * sin(now * 1.7 + 1); rate = 1
         case .gesture(let g):
             if !failTasks.contains(g) { Self.apply(run.tasks[g].gesture, level: Self.pattern(run.tasks[g], t: el), to: &f) }
         case .gazeCal:
@@ -106,7 +100,7 @@ public final class GuideSynthUser {
         if let t = gazeTarget {
             let w = Double(run.screen.width), h = Double(run.screen.height)
             f.landmarks = Self.landmarks(gx: (Double(t.x) - w / 2) / (0.486 * w), gy: (Double(t.y) - h / 2) / (0.478 * h))
-            f.yaw = 0; f.pitch = 0
+            if case .gazeCal = run.stage { f.yaw = 0; f.pitch = 0 }
         }
         return f
     }

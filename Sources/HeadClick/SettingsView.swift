@@ -37,7 +37,7 @@ struct SettingsView: View {
                 if let b = Profile.builtIn.first(where: { $0.name == model.profile.name }) { model.profile = b }
             }.disabled(!Profile.builtIn.contains { $0.name == model.profile.name })
             Spacer()
-            Button("Calibrate pointer…") { model.startCalibration(.pointer) }
+            Button("Calibrate head pointer…") { model.startCalibration(.pointer) }
             Button("Talk test…") { model.startCalibration(.talkTest) }
         }
     }
@@ -45,6 +45,18 @@ struct SettingsView: View {
     var pointerBox: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Pointer and guards").font(.headline)
+            HStack(spacing: 18) {
+                Picker("Pointer", selection: $model.pointerMode) {
+                    ForEach(PointerMode.allCases, id: \.self) { Text($0.title).tag($0) }
+                }.frame(width: 360)
+                Toggle("Snap to buttons and links (within 60 px)", isOn: $model.snapEnabled).disabled(model.pointerMode != .gaze)
+            }
+            HStack(spacing: 18) {
+                Button("Calibrate eyes (13 dots)…") { model.startGazeCalibration() }
+                Button("Fix drift (one dot)") { model.startDriftFix() }
+                Text("Eyes: " + model.gazeSummary).font(.caption).foregroundStyle(.secondary)
+            }
+            Text("Head pointer options (only used when the pointer is set to Head):").font(.caption).foregroundStyle(.secondary)
             HStack {
                 Text("Horizontal speed").frame(width: 130, alignment: .leading)
                 Slider(value: $model.profile.pointer.gainX, in: 15...150)
@@ -65,9 +77,7 @@ struct SettingsView: View {
                 Toggle("Swap left/right eye and mouth", isOn: $model.profile.swapLeftRight)
             }
             HStack(spacing: 18) {
-                Toggle("Gaze jump (look somewhere, cursor jumps there)", isOn: $model.profile.gazeJump)
-                Button("Calibrate gaze…") { model.startGazeCalibration() }
-                Text(model.gazeSummary).font(.caption).foregroundStyle(.secondary)
+                Toggle("Head mode: gaze jump (look somewhere, cursor jumps there)", isOn: $model.profile.gazeJump)
             }
         }
     }

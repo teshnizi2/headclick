@@ -29,6 +29,9 @@ public final class Controller {
     public var onAction: ((Action, GestureID) -> Void)?
     /// Optional hook: gaze jump target in screen points, given the latest frame.
     public var gaze: GazeJump?
+    /// `.gaze`: the cursor follows `gazePointer` (the eyes) and the head angles never move it. `.head`: the relative head pointer.
+    public var pointerMode: PointerMode = .head
+    public var gazePointer: GazePointer?
 
     public private(set) var paused = false
     private var autoPaused = false
@@ -200,15 +203,27 @@ public final class Controller {
 
         // pointer
         let frozen = (anyArming && !anyHolding) || paused || autoPaused
-        if !(paused || autoPaused) {
-            if let g = gaze, let target = g.target(frame: f, now: now, cursor: pointer.position), !frozen {
-                pointer.warp(to: target)
-                pointer.resetFilters()
+        if pointerMode == .gaze {
+            if paused || autoPaused { gazePointer?.reset() }
+            else if let gp = gazePointer {
+                let closed = max(f[.eyeBlinkLeft], f[.eyeBlinkRight]) > 0.4
+                if let target = gp.update(f, now: now, eyesClosed: closed), !frozen {
+                    let before = pointer.position
+                    pointer.warp(to: target)
+                    if pointer.position != before { sink.move(to: pointer.position, dragging: dragging) }
+                }
             }
+        } else {
+            if !(paused || autoPaused) {
+                if let g = gaze, let target = g.target(frame: f, now: now, cursor: pointer.position), !frozen {
+                    pointer.warp(to: target)
+                    pointer.resetFilters()
+                }
+            }
+            let before = pointer.position
+            pointer.update(t: now, yaw: Double(f.yaw), pitch: Double(f.pitch), frozen: frozen)
+            if pointer.position != before { sink.move(to: pointer.position, dragging: dragging) }
         }
-        let before = pointer.position
-        pointer.update(t: now, yaw: Double(f.yaw), pitch: Double(f.pitch), frozen: frozen)
-        if pointer.position != before { sink.move(to: pointer.position, dragging: dragging) }
         history.append((now, pointer.position))
         history.removeAll { now - $0.0 > 1.0 }
         if !fired.isEmpty { st.position = pointer.position }

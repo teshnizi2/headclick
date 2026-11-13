@@ -27,8 +27,7 @@ struct GuideView: View {
                 guideBg
                 content(geo.size)
                 if run.stage == .gazeCal {
-                    // the 13 dots use the whole screen: keep only a skip button and the stop hint, between the dots
-                    Button("Skip gaze ›") { run.skip() }.position(x: geo.size.width * 0.25, y: 34)
+                    // the 13 dots use the whole screen: keep only the stop hint, between the dots
                     Text("Esc = stop").font(.system(size: 14)).foregroundStyle(.white.opacity(0.5)).position(x: geo.size.width * 0.75, y: 34)
                 } else {
                     VStack(spacing: 0) {
@@ -75,8 +74,8 @@ struct GuideView: View {
             Spacer()
             if run.stage != .summary {
                 if run.phase == .failed { Button("Try again") { run.retry() }.controlSize(.large) }
-                if run.phase == .running { Button("Skip ›") { run.skip() }.controlSize(.large) }
-                else if run.stage != .gazeIntro { Button(run.phase == .failed ? "Continue anyway ›" : "Next ›") { run.next() }.controlSize(.large).keyboardShortcut(.defaultAction) }
+                if run.phase == .running { if run.stage != .gazeIntro { Button("Skip ›") { run.skip() }.controlSize(.large) } }
+                else { Button(run.phase == .failed ? "Continue anyway ›" : "Next ›") { run.next() }.controlSize(.large).keyboardShortcut(.defaultAction) }
             }
         }
         .padding(.horizontal, 28).padding(.vertical, 18)
@@ -85,7 +84,6 @@ struct GuideView: View {
     @ViewBuilder func content(_ size: CGSize) -> some View {
         switch run.stage {
         case .camera: cameraPanel
-        case .pointerCal: pointerCalPanel
         case .dot: dotsPanel(size)
         case .gesture: gesturePanel
         case .gazeIntro: gazeIntro
@@ -128,17 +126,7 @@ struct GuideView: View {
         .padding(.top, 20)
     }
 
-    // MARK: 2 pointer
-    var pointerCalPanel: some View {
-        VStack(spacing: 26) {
-            Text("🙂").font(.system(size: 100))
-            big("Pointer calibration", 22, .bold).foregroundStyle(guideAccent)
-            big(run.message, 36).frame(maxWidth: 800)
-            if let c = run.calibrator { CalibBar(cal: c) }
-            Text("Measuring how far your head turns, so the dot reaches every edge.").font(.system(size: 18)).foregroundStyle(.white.opacity(0.6))
-        }
-    }
-
+    // MARK: 3 look at the dots
     func dotsPanel(_ size: CGSize) -> some View {
         ZStack {
             ForEach(0..<5, id: \.self) { k in
@@ -158,8 +146,9 @@ struct GuideView: View {
             }
             VStack(spacing: 10) {
                 big(run.message, 38)
-                Text("The orange dot is your head pointer. Watch it follow you.").font(.system(size: 20)).foregroundStyle(.white.opacity(0.6))
+                Text("The orange dot is where I think you look. Your head does not move it.").font(.system(size: 20)).foregroundStyle(.white.opacity(0.6))
                 if !run.hint.isEmpty { Text(run.hint).foregroundStyle(.orange) }
+                dotErrorLine
             }
             .frame(maxWidth: 760).position(x: size.width / 2, y: size.height * 0.31)
             Circle().fill(guideAccent).frame(width: 30, height: 30)
@@ -169,7 +158,14 @@ struct GuideView: View {
         }
     }
 
-    // MARK: 3 gestures
+    /// "centre 1.8 cm · left 2.6 cm · ..." for the dots checked so far.
+    var dotErrorLine: some View {
+        let parts = (0..<5).compactMap { k in run.dotErrorsCm[k].map { String(format: "%@ %.1f cm", GuidedRun.dotNames[k], $0) } }
+        return Text(parts.isEmpty ? " " : "Error: " + parts.joined(separator: " · "))
+            .font(.system(size: 18, design: .monospaced)).foregroundStyle(.white.opacity(0.75))
+    }
+
+    // MARK: 4 gestures
     var gesturePanel: some View {
         let i = run.currentGestureIndex ?? 0
         let t = run.tasks[i]
@@ -200,14 +196,15 @@ struct GuideView: View {
         }
     }
 
-    // MARK: 4 gaze
+    // MARK: 2 eyes
     var gazeIntro: some View {
         VStack(spacing: 24) {
             Text("👀").font(.system(size: 110))
-            big("Optional: gaze", 26, .bold).foregroundStyle(guideAccent)
-            big("Keep your head still and look at each dot as it appears. About 30 seconds, 13 dots.", 32).frame(maxWidth: 780)
-            Text("Gaze lets the cursor jump to where you look; your head then fine-tunes it. Skip it if you are short of time.").font(.system(size: 18)).foregroundStyle(.white.opacity(0.6)).frame(maxWidth: 700).multilineTextAlignment(.center)
-            Button("Start gaze calibration") { run.next() }.controlSize(.extraLarge).buttonStyle(.borderedProminent)
+            big("Eye calibration", 26, .bold).foregroundStyle(guideAccent)
+            big("Look at each dot as it appears. 13 dots, about 15 seconds.", 32).frame(maxWidth: 780)
+            Text("Let your head move naturally; only your eyes matter. This is how the cursor learns where you look.").font(.system(size: 18)).foregroundStyle(.white.opacity(0.6)).frame(maxWidth: 700).multilineTextAlignment(.center)
+            Text("Starting in \(Int(run.secondsLeft.rounded(.up)))…").font(.system(size: 20, design: .monospaced)).foregroundStyle(.white.opacity(0.7))
+            Button("Start now") { run.next() }.controlSize(.extraLarge).buttonStyle(.borderedProminent)
         }
     }
 
@@ -267,7 +264,7 @@ struct GazeDotPanel: View {
     let screen: CGSize
     var body: some View {
         ZStack {
-            Text(cal.finished ? cal.result : cal.prompt + "  (head still, eyes on the dot)")
+            Text(cal.finished ? cal.result : cal.prompt + "  (eyes on the dot)")
                 .font(.system(size: 22, weight: .medium)).foregroundStyle(.white.opacity(0.85)).multilineTextAlignment(.center)
                 .frame(maxWidth: 800).position(x: screen.width / 2, y: screen.height * 0.30)
             if !cal.finished {

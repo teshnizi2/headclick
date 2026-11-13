@@ -1,4 +1,5 @@
 import SwiftUI
+import HeadClickCore
 
 struct HeadClickApp: App {
     @StateObject private var model = AppModel.shared
@@ -31,12 +32,15 @@ struct HeadClickApp: App {
                 ForEach(model.profiles, id: \.name) { Text($0.name).tag($0) }
             }
             Toggle("Filming overlay   ⌃⌥O", isOn: $model.overlayOn)
-            Toggle("Gaze jump", isOn: $model.profile.gazeJump)
-            Toggle("Gaze only (comparison mode)", isOn: $model.gazeOnly)
-            Button("Calibrate gaze…") { model.startGazeCalibration() }
+            Picker("Pointer", selection: $model.pointerMode) {
+                ForEach(PointerMode.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+            Toggle("Snap to buttons and links", isOn: $model.snapEnabled).disabled(model.pointerMode != .gaze)
+            Button("Calibrate eyes (13 dots)…") { model.startGazeCalibration() }
+            Button("Fix drift: look at the centre dot") { model.startDriftFix() }
             Divider()
             Button("Settings…") { Windows.showSettings() }
-            Button("Calibrate pointer…") { model.startCalibration(.pointer) }
+            Button("Calibrate head pointer…") { model.startCalibration(.pointer) }
             Button("Debug window") { Windows.showDebug() }
             Divider()
             Button("Quit HeadClick") { NSApplication.shared.terminate(nil) }.keyboardShortcut("q")

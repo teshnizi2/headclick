@@ -29,9 +29,7 @@ final class GuideDemo {
     var timer: Timer?
 
     static func start() {
-        var p = Profile.quietDesk
-        p.pointer = PointerSettings()          // uncalibrated, so the demo also shows the pointer calibration
-        AppModel.shared.startGuide(demo: true, profile: p)
+        AppModel.shared.startGuide(demo: true, profile: Profile.quietDesk)
         guard let run = AppModel.shared.guide else { return }
         let d = GuideDemo(run: run)
         AppModel.shared.guideDemo = d
@@ -52,15 +50,12 @@ final class GuideDemo {
         func gesture(_ i: Int) -> (GuidedRun) -> Bool { { $0.stage == .gesture(i) && $0.hits == 2 } }
         shots = [
             Shot(name: "guided-1-camera", when: { $0.stage == .camera && $0.phase == .passed }),
-            Shot(name: "guided-2a-pointer-calibration", when: { $0.stage == .pointerCal && ($0.calibrator?.stepNumber ?? 0) >= 2 && ($0.calibrator?.progress ?? 0) > 0.5 }),
-            Shot(name: "guided-2b-pointer-dots", when: { r in
-                guard r.stage == .dot(2), r.dotOutcomes[1] == .passed else { return false }
-                let d = hypot(r.pointerPos.x - r.dots[2].x, r.pointerPos.y - r.dots[2].y); return d > 150 && d < 450 }),
+            Shot(name: "guided-2a-eyes-intro", when: { $0.stage == .gazeIntro }),
+            Shot(name: "guided-2b-eyes-dots", when: { $0.stage == .gazeCal && ($0.gaze?.progress ?? 0) > 0.6 && ($0.gaze?.target.x ?? 0) < $0.screen.width * 0.3 && ($0.gaze?.target.y ?? 0) > $0.screen.height * 0.4 }),
+            Shot(name: "guided-2c-look-dots", when: { $0.stage == .dot(3) && $0.dotErrorsCm[2] != nil && $0.dotProgress == 0 }),
         ]
         for i in 0..<n { shots.append(Shot(name: "guided-3\(["a", "b", "c", "d", "e", "f"][min(i, 5)])-gesture-\(run.tasks[i].action.rawValue)", when: gesture(i))) }
         shots.append(Shot(name: "guided-3z-gesture-failed", when: { $0.currentGestureIndex == n - 1 && $0.phase == .failed }))
-        shots.append(Shot(name: "guided-4a-gaze-intro", when: { $0.stage == .gazeIntro }))
-        shots.append(Shot(name: "guided-4b-gaze-dots", when: { $0.stage == .gazeCal && ($0.gaze?.progress ?? 0) > 0.6 && ($0.gaze?.target.x ?? 0) < $0.screen.width * 0.3 && ($0.gaze?.target.y ?? 0) > $0.screen.height * 0.4 }))
         shots.append(Shot(name: "guided-5-summary", when: { $0.stage == .summary }))
         if n > 0 { user.failTasks = [n - 1] }       // the last gesture (pause) is the one the fake user cannot do: shows the failure screen
     }

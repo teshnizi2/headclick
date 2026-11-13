@@ -23,6 +23,14 @@ final class AppModel: ObservableObject {
     @Published var calibrator: Calibrator?
     @Published var gazeSummary = ""
     @Published var guide: GuidedRun?
+    /// Eyes (default) or the older head pointer. The head is never used to aim in eye mode.
+    @Published var pointerMode: PointerMode = PointerMode(rawValue: UserDefaults.standard.string(forKey: "HeadClick.pointerMode") ?? "") ?? .gaze {
+        didSet { UserDefaults.standard.set(pointerMode.rawValue, forKey: "HeadClick.pointerMode"); applyPointerMode() }
+    }
+    /// Snap the eye cursor to the nearest button or link within about 60 px (needs Accessibility).
+    @Published var snapEnabled: Bool = (UserDefaults.standard.object(forKey: "HeadClick.snap") as? Bool) ?? true {
+        didSet { UserDefaults.standard.set(snapEnabled, forKey: "HeadClick.snap"); applyPointerMode() }
+    }
     @Published var preview: CGImage?
     private var guideWindow: GuideWindow?
     var guideDemo: GuideDemo?
@@ -50,6 +58,8 @@ final class AppModel: ObservableObject {
             return String(format: "camera fps %.1f, engine median %.1f ms, face in view at end: %@, paused at end: %@\n", self.pipeline.fps, self.pipeline.engineMs, st.faceFound ? "yes" : "no", st.paused ? "yes" : "no")
         }
         controller.onToast = { [weak self] text in DispatchQueue.main.async { self?.showToast(text) } }
+        controller.gazePointer = eyePointer
+        applyPointerMode()
     }
 
     /// Always starts paused. Only a time-limited test run (`--test-seconds N --active`) may start tracking at once.
@@ -128,12 +138,21 @@ final class AppModel: ObservableObject {
     // MARK: gaze
     let gaze = GazeEstimator.load()
     lazy var jumper = GazeJumper(estimator: gaze)
+    lazy var eyePointer = GazePointer(estimator: gaze)
+    private let axTargets = AXClickTargets()
     private var gazeCal: GazeCalibrator?
     private var gazeWindow: GazeWindow?
-    @Published var gazeOnly = false { didSet { jumper.onlyMode = gazeOnly; applyGaze() } }
+    private var driftFix: DriftFixer?
+
+    func applyPointerMode() {
+        controller.pointerMode = pointerMode
+        eyePointer.snapFinder = (snapEnabled && CursorDriver.isTrusted) ? axTargets : nil
+        eyePointer.reset()
+        applyGaze()
+    }
 
     func applyGaze() {
-        let on = (profile.gazeJump || gazeOnly) && jumper.estimator.isCalibrated
+        let on = pointerMode == .head && profile.gazeJump && jumper.estimator.isCalibrated
         controller.gaze = on ? jumper : nil
         jumper.reset()
         gazeSummary = jumper.estimator.isCalibrated ? "calibrated" : "not calibrated yet"
@@ -161,12 +180,40 @@ final class AppModel: ObservableObject {
     func endGazeCalibration(apply: Bool) {
         guard let cal = gazeCal else { return }
         if apply, !cal.failed, cal.estimator.isCalibrated {
-            jumper.estimator.adopt(cal.estimator); jumper.estimator.save()
-            showToast(String(format: "Gaze calibrated: %.1f cm", cal.meanErrorCm))
+            gaze.adopt(cal.estimator); gaze.save()
+            showToast(String(format: "Eyes calibrated: %.1f cm", cal.meanErrorCm))
         }
         gazeWindow?.orderOut(nil); gazeWindow = nil; gazeCal = nil
         controller.setPaused(pausedBeforeCalibration, toast: false)
         applyGaze()
+    }
+
+    /// One-dot recentre: look at the centre dot and the eye model's offset is corrected (fixes drift without 13 dots).
+    func startDriftFix() {
+        guard let scr = NSScreen.main, gaze.isCalibrated else { showToast("Calibrate your eyes first"); return }
+        if driftFix != nil { return }
+        endCalibration(calibratorRef, apply: false)
+        let bounds = CGRect(origin: .zero, size: scr.frame.size)
+        let fix = DriftFixer(estimator: gaze, screen: bounds)
+        driftFix = fix
+        pausedBeforeCalibration = controller.paused
+        controller.setPaused(true, toast: false)
+        let w = GazeWindow(contentRect: scr.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        w.level = .screenSaver; w.isReleasedWhenClosed = false; w.backgroundColor = .clear
+        w.title = "HeadClick recentre"
+        w.onEscape = { [weak self] in self?.endDriftFix() }
+        w.contentView = NSHostingView(rootView: DriftFixView(fix: fix, screen: bounds))
+        gazeWindow = w
+        w.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func endDriftFix() {
+        guard let fix = driftFix else { return }
+        if fix.finished, !fix.failed { gaze.save() }
+        gazeWindow?.orderOut(nil); gazeWindow = nil; driftFix = nil
+        eyePointer.reset()
+        controller.setPaused(pausedBeforeCalibration, toast: false)
+        showToast(fix.finished ? fix.result : "Recentre cancelled")
     }
 
     // MARK: guided start
@@ -187,6 +234,7 @@ final class AppModel: ObservableObject {
         let sizeMM = CGDisplayScreenSize(CGMainDisplayID())
         let widthCm = sizeMM.width > 0 ? Double(sizeMM.width) / 10 : 30
         let run = GuidedRun(profile: demoProfile ?? profile, screen: CGRect(origin: .zero, size: scr.frame.size), widthCm: widthCm)
+        if !demo, gaze.isCalibrated { run.gazeCalibratedElsewhere = gaze }
         if demo { run.label = "DEMO: synthetic face, not a real run" }
         run.onSummary = { [weak self] in self?.guideSummaryReached(demo: demo) }
         guide = run
@@ -203,7 +251,7 @@ final class AppModel: ObservableObject {
     private func guideSummaryReached(demo: Bool) {
         guard let run = guide else { return }
         if run.profileChanged { profile = run.profile }
-        if let e = run.gazeEstimator { jumper.estimator.adopt(e); jumper.estimator.save(); applyGaze() }
+        if let e = run.gazeEstimator { gaze.adopt(e); gaze.save(); eyePointer.reset(); applyGaze() }
         let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd-HHmm"
         let dir = AppModel.guideDocsDir
         let url = dir.appendingPathComponent(demo ? "guided-demo-summary.txt" : "guided-run-\(df.string(from: Date())).txt")
@@ -221,6 +269,8 @@ final class AppModel: ObservableObject {
 
     func startControlFromGuide() {
         guard CursorDriver.isTrusted else { requestAccessibility(); showToast("Allow Accessibility, then press the button again"); return }
+        if pointerMode == .gaze, !gaze.isCalibrated { showToast("The eye calibration did not finish: go back and run it again"); return }
+        applyPointerMode()                                   // snapping needs Accessibility, which is now granted
         endGuide()
         SafetyGuard.shared.graceUntil = Date().addingTimeInterval(1.5)
         controller.pointer.warp(to: controller.sink.currentPosition)     // start from where the real cursor is
@@ -228,7 +278,11 @@ final class AppModel: ObservableObject {
     }
 
     func togglePause() {
-        if controller.paused { SafetyGuard.shared.graceUntil = Date().addingTimeInterval(1.0) }
+        if controller.paused {
+            if pointerMode == .gaze, !gaze.isCalibrated { showToast("Calibrate your eyes first"); startGazeCalibration(); return }
+            SafetyGuard.shared.graceUntil = Date().addingTimeInterval(1.0)
+            eyePointer.reset()
+        }
         controller.setPaused(!controller.paused)
     }
 
@@ -243,6 +297,10 @@ final class AppModel: ObservableObject {
             else { self.controller.process(f, now: t) }
             if let cal = self.calibratorRef { DispatchQueue.main.async { cal.feed(f, now: t) } }
             if let gc = self.gazeCal { DispatchQueue.main.async { gc.feed(f, now: t) } }
+            if let df = self.driftFix { DispatchQueue.main.async { [weak self] in
+                df.feed(f, now: t)
+                if df.finished, self?.driftFix === df { DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { self?.endDriftFix() } }
+            } }
             let now = CFAbsoluteTimeGetCurrent()
             if now - self.lastPublish < 1 / 20.0 { return }
             self.lastPublish = now

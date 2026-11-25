@@ -3,7 +3,7 @@ INFO: Created TensorFlow Lite XNNPACK delegate for CPU.
 W0000 00:00:1794478550.714693 5946963 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
 W0000 00:00:1794478550.751849 5946963 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
 engine created in 247 ms
-image: /Users/teshnizi/Projects/cursor-control/app/build/HeadClick.app/Contents/Resources/test-face.jpg
+image: build/HeadClick.app/Contents/Resources/test-face.jpg
 detect (incl. file decode) median 89.4 ms, p95 496.7 ms
 landmarks: 478  blendshapes: 52
 pose  yaw -1.8°  pitch 4.2°  roll 0.4°  scale 1.00

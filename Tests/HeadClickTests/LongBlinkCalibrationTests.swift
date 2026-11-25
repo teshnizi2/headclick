@@ -1,7 +1,7 @@
 import XCTest
 @testable import HeadClickCore
 
-/// Reza's guide run failed with "Long blink (eyes closed) was too small to measure (rest 0.64, peak 0.67)":
+/// A guide run failed with "Long blink (eyes closed) was too small to measure (rest 0.64, peak 0.67)":
 /// his natural blinks during the 3 s rest window raised the "rest" level (a 95th percentile) up to the closed-eye level.
 final class LongBlinkCalibrationTests: XCTestCase {
     /// A user who blinks naturally while resting (0.2 s blink every 1.2 s: about 17% of the frames are blink frames),

@@ -4,3 +4,4 @@ vendor/
 build/
 *.app
 .DS_Store
+scripts/identity.local

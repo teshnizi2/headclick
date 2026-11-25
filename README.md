@@ -1,11 +1,13 @@
 # HeadClick
 
+New here? See [HANDOFF.md](HANDOFF.md) for status, build steps and next work.
+
 Camera-only cursor control for macOS. **Your eyes move the pointer**: the cursor goes where you look (the head does not matter), and any facial gesture you choose clicks, drags, scrolls or pauses. The older head pointer is still there as an option in Settings. A demo and experiment, not a daily driver.
 
 MIT licensed, written from scratch. Face tracking is Google MediaPipe Face Landmarker (Apache-2.0, see `ThirdParty/NOTICE`), called through its C API.
 
 ## Build and run
-Needs macOS 15+, Xcode (Swift 6) and the Apple Development signing identity named in `scripts/bundle.sh` (set `HEADCLICK_IDENTITY` to use another).
+Needs macOS 15+, Xcode (Swift 6) and an optional signing identity (`HEADCLICK_IDENTITY` or untracked `scripts/identity.local`; otherwise ad-hoc).
 
 ```bash
 scripts/bundle.sh          # fetches MediaPipe 1.2.3 + model into vendor/ (once, SHA-256 pinned), builds, signs build/HeadClick.app

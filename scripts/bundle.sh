@@ -3,7 +3,12 @@
 # Apple Development identity so Camera/Accessibility grants survive rebuilds.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-IDENTITY="${HEADCLICK_IDENTITY:-Apple Development: mohammadreza Ahmaditeshnizi (L36DR2X88W)}"
+IDENTITY="${HEADCLICK_IDENTITY:-}"
+if [ -z "$IDENTITY" ] && [ -f scripts/identity.local ]; then IDENTITY="$(head -n1 scripts/identity.local)"; fi
+if [ -z "$IDENTITY" ]; then
+  IDENTITY="-"
+  echo "note: signing ad-hoc (set HEADCLICK_IDENTITY or scripts/identity.local); macOS will ask for Camera and Accessibility again after each rebuild."
+fi
 CONFIG="${CONFIG:-release}"
 [ -f vendor/libmediapipe.dylib ] || ./scripts/fetch-mediapipe.sh
 swift build -c "$CONFIG" --product HeadClick
